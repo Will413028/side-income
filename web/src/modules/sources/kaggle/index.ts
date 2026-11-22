@@ -184,7 +184,7 @@ export async function scan(fetcher: Fetcher): Promise<{ seen: number; listings: 
     try {
       const detail = parseDetail(pageHtml("kaggle", (await fetcher.get(renderRequest(`${ORIGIN}/competitions/${c.slug}`, DETAIL_WAIT))).body));
       rendered++;
-      if (detail.standard) standard++;
+      if (detail.standard || detail.deadline) standard++;
       // Every competition page shows its `Close` field: a page with neither it nor a deadline is not one
       // (a check page the title pattern does not know), so the source is blocked, not one page.
       if (detail.open === null && !detail.deadline) throw new AccessChallenge("kaggle: a page that is not a competition page");
@@ -207,8 +207,8 @@ export async function scan(fetcher: Fetcher): Promise<{ seen: number; listings: 
       rejected++;
     }
   }
-  // No page with Kaggle's own timeline label means the page layout (or its render) changed: fail the run
-  // rather than store every competition without its deadline.
+  // No page with Kaggle's own timeline label or any read deadline means the page layout (or its render)
+  // changed: fail the run rather than store every competition without its deadline.
   if (rendered > 0 && standard === 0) throw new SourceError("kaggle: no detail page shows a final submission deadline");
   return { seen: open.length, listings, truncated: open.length > MAX_DETAILS, rejected, examined };
 }

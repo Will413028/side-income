@@ -164,6 +164,8 @@ describe("kaggle pages", () => {
 
   it("fails the run when no page read shows a final submission deadline (the layout or the render changed)", async () => {
     await expect(scan(serving(site("<h1>T</h1><span>Close</span><span>10 days to go</span>")))).rejects.toThrow(/no detail page shows a final submission deadline/);
+    const colon = "<h1>T</h1><span>Close</span><span>10 days to go</span><p>Final submission deadline: January 20, 2027 at 10:00 UTC.</p>";
+    expect((await scan(serving(site(colon)))).listings.length).toBe(2);
   });
 
   it("fails the run when the list does not render, and on Kaggle's check page", async () => {
