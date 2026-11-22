@@ -53,10 +53,19 @@ export function parseList(html: string): Card[] {
     const a = $(el);
     const slug = idOf(a.attr("href"));
     if (!slug || cards.has(slug)) continue;
+    // The grid card's prize and state sit beside its link, not in it (measured on the VM 2026-11-22: the
+    // link holds the icon, title, summary and team count): the card is the largest ancestor that links
+    // to this competition only.
+    let card = a;
+    for (let i = 0; i < 8; i++) {
+      const up = card.parent();
+      if (!up.length || up.is("body") || new Set(up.find("a[href]").toArray().map((x) => idOf($(x).attr("href"))).filter(Boolean)).size > 1) break;
+      card = up;
+    }
     const titleEl = a.find("div").filter((_, d) => $(d).children().length === 0 && $(d).text().trim() !== "").first();
-    const texts = leaves($, el);
-    const row = a.find("span").toArray().map((s) => $(s).text().trim()).find((t) => t.includes(" · "));
-    const heading = a.find("h2").first().text().trim();
+    const texts = leaves($, card.get(0)!);
+    const row = card.find("span").toArray().map((s) => $(s).text().trim()).find((t) => t.includes(" · "));
+    const heading = card.find("h2").first().text().trim();
     cards.set(slug, {
       slug, title: titleEl.text().trim() || (a.attr("aria-label") ?? "").trim(),
       hackathon: a.find(".google-symbols").first().text().trim() === "rocket_launch",
