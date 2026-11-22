@@ -10,6 +10,7 @@ import { ZINDI_SETTINGS } from "./zindi";
 import { DRIVENDATA_SETTINGS } from "./drivendata";
 import { CRUNCHDAO_SETTINGS } from "./crunchdao";
 import { BHUNTR_SETTINGS } from "./bhuntr";
+import { KAGGLE_SETTINGS } from "./kaggle";
 import { DYNAMITEJOBS_SETTINGS } from "./dynamitejobs";
 import { freeJobsConnector } from "./free-jobs";
 import { FREELANCER_SETTINGS } from "./freelancer";
@@ -96,6 +97,8 @@ export const SOURCES: readonly SourceSettings[] = [
   { ...CRUNCHDAO_SETTINGS, order: 380 },
   // Opportunity types plan step 6c-1: 獎金獵人 (browser tier, times read as UTC: D16).
   { ...BHUNTR_SETTINGS, order: 390 },
+  // Opportunity types plan step 6c-3: Kaggle (stealth tier, D15).
+  { ...KAGGLE_SETTINGS, order: 400 },
 ];
 
 export function sourceSettings(name: string): SourceSettings {

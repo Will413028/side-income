@@ -33,7 +33,9 @@ export class AccessChallenge extends SourceError {}
 
 // captcha-delivery.com: DataDome's interstitial (Wellfound is known to use it, plan step 8b);
 // sec-if-cpt-container: Akamai's behavioural challenge (Remote.co answered a Chrome fingerprint with it, step 8c).
-const CHALLENGE = /cf-chl-|_Incapsula_Resource|captcha-container|captcha-delivery\.com|sec-if-cpt-container|<title>\s*(?:Just a moment|Access denied)/i;
+// Checking your browser: Kaggle's reCAPTCHA check page (opportunity types plan D15); every Kaggle page loads a
+// hidden reCAPTCHA script, so the word captcha alone is no sign of it.
+const CHALLENGE = /cf-chl-|_Incapsula_Resource|captcha-container|captcha-delivery\.com|sec-if-cpt-container|<title>\s*(?:Just a moment|Access denied|Checking your browser)/i;
 
 /** A page's HTML: empty or over 2 MB, not UTF-8, or an access challenge refuses it (old pageText). */
 export function pageHtml(name: string, raw: Uint8Array): string {
