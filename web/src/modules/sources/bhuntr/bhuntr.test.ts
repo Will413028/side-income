@@ -83,6 +83,10 @@ describe("bhuntr pages", () => {
     expect(periodEnd("徵件期間 2026-06-11 16:00 至 2026-09-28 15:59 評選期間 2026-11-20 04:00 至 2026-12-20 04:00")).toBe("2026-09-28T15:59:00.000Z");
   });
 
+  it("skips the label where it appears in prose before the field", () => {
+    expect(periodEnd("請於徵件期間內上傳作品。 徵件期間 2026-10-22 02:00 至 2026-11-30 15:59")).toBe("2026-11-30T15:59:00.000Z");
+  });
+
   it("reads a period whose date and time sit in separate elements", () => {
     expect(periodEnd("徵件期間2026-10-2202:00至2026-11-3015:59評選期間2027-01-0100:00至2027-02-0100:00")).toBe("2026-11-30T15:59:00.000Z");
   });

@@ -71,23 +71,25 @@ const PAIR = /\d{4}-\d{2}-\d{2}\s*\d{2}:\d{2}\s*至\s*(\d{4})-(\d{2})-(\d{2})\s*
 /**
  * The end of the submission period, read as UTC (D16). The block is `徵件期間` followed by one
  * `YYYY-MM-DD HH:MM 至 YYYY-MM-DD HH:MM`, or by one per category, each after its category's name (measured
- * 2026-11-22); it ends at the next period label (`評選期間` and the like). With several categories the
+ * 2026-11-22); it ends at the next period label (`評選期間` and the like); the label in prose before the field is skipped. With several categories the
  * latest end is the competition's: entries are taken until then. Null when no pair is readable.
  */
 export function periodEnd(pageText: string): string | null {
-  const start = pageText.indexOf("徵件期間");
-  if (start < 0) return null;
-  const rest = pageText.slice(start + 4, start + 4 + 600);
-  const next = /[\u4e00-\u9fff]{1,4}期間/.exec(rest);
-  let latest: string | null = null;
-  for (const m of (next ? rest.slice(0, next.index) : rest).matchAll(PAIR)) {
-    const [y, mo, d, h, mi] = m.slice(1).map(Number);
-    const t = new Date(Date.UTC(y, mo - 1, d, h, mi));
-    if (h > 23 || mi > 59 || t.getUTCMonth() !== mo - 1 || t.getUTCDate() !== d) continue;
-    const at = t.toISOString();
-    if (latest === null || at > latest) latest = at;
+  // The label can also appear in prose ("徵件期間內…"): the first occurrence whose block holds a pair is the field.
+  for (let start = pageText.indexOf("徵件期間"); start >= 0; start = pageText.indexOf("徵件期間", start + 4)) {
+    const rest = pageText.slice(start + 4, start + 4 + 600);
+    const next = /[\u4e00-\u9fff]{1,4}期間/.exec(rest);
+    let latest: string | null = null;
+    for (const m of (next ? rest.slice(0, next.index) : rest).matchAll(PAIR)) {
+      const [y, mo, d, h, mi] = m.slice(1).map(Number);
+      const t = new Date(Date.UTC(y, mo - 1, d, h, mi));
+      if (h > 23 || mi > 59 || t.getUTCMonth() !== mo - 1 || t.getUTCDate() !== d) continue;
+      const at = t.toISOString();
+      if (latest === null || at > latest) latest = at;
+    }
+    if (latest !== null) return latest;
   }
-  return latest;
+  return null;
 }
 
 /** The organiser's name from the page's JSON-LD Event; null when absent or unreadable. */
