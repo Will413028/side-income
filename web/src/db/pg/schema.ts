@@ -23,7 +23,9 @@ export type OpportunityType = (typeof OPPORTUNITY_TYPES)[number];
 /**
  * The types the database admits (the opportunity_type CHECK): the known ones plus those admitted ahead of
  * the image that writes them, so the constraint lands one deploy before its writer (plan step 3). None is
- * ahead now: `contest` was, until the image of plan step 5 wrote it.
+ * ahead now: `contest` was, until the image of plan step 5 wrote it. A type admitted ahead also extends
+ * typeColumnChecks in the same migration (step 5c-2), or its first write of a job fact or a contest
+ * column is refused.
  */
 export const ADMITTED_OPPORTUNITY_TYPES = [...OPPORTUNITY_TYPES] as const;
 export const CATEGORIES = ["AI agent", "AI 整合／自動化", "後端／API", "全端 MVP"] as const;
@@ -75,7 +77,8 @@ const content = () => ({
   hackathon: boolean("hackathon"),
   /**
    * Job-only facts (opportunity types plan D10): present on a job row, null on a contest row. Step 5c-1
-   * (deploy E1) makes them nullable and the contest evaluator stores null; step 5c-2 adds the per-type rule.
+   * (deploy E1) makes them nullable and the contest evaluator stores null; step 5c-2 adds the per-type rule
+   * (typeColumnChecks).
    */
   category: text("category"),
   categoryScore: smallint("category_score"),
@@ -93,6 +96,22 @@ const deadlineChecks = (prefix: string, t: { deadlineKind: unknown; deadlineText
   check(`${prefix}_deadline_kind`, oneOf(t.deadlineKind, DEADLINE_KINDS)),
   check(`${prefix}_deadline_at`, sql`(${t.deadlineAt} is not null) = coalesce(${t.deadlineKind} in ('date', 'instant'), false)`),
   check(`${prefix}_deadline_text`, sql`(${t.deadlineText} is not null) = (${t.deadlineKind} is not null)`),
+];
+
+/**
+ * The per-type column rules (opportunity types plan D10, step 5c-2): the job-only facts are set on a job row
+ * and null on any other type; the contest-only columns are null on any type but contest. A new type extends
+ * both expressions.
+ */
+const typeColumnChecks = (prefix: string, t: {
+  opportunityType: unknown; category: unknown; categoryScore: unknown; confirmedBase: unknown;
+  registrationDeadline: unknown; prizeText: unknown; online: unknown; inviteOnly: unknown; hackathon: unknown;
+}) => [
+  check(`${prefix}_job_facts`, sql`case when ${t.opportunityType} = 'job'
+    then ${t.category} is not null and ${t.categoryScore} is not null and ${t.confirmedBase} is not null
+    else ${t.category} is null and ${t.categoryScore} is null and ${t.confirmedBase} is null end`),
+  check(`${prefix}_contest_columns`, sql`${t.opportunityType} = 'contest' or (${t.registrationDeadline} is null and ${t.prizeText} is null
+    and ${t.online} is null and ${t.inviteOnly} is null and ${t.hackathon} is null)`),
 ];
 
 export const listings = pgTable("listings", {
@@ -127,6 +146,7 @@ export const listings = pgTable("listings", {
   kindCheck("listings_kind", t.kind),
   ...deadlineChecks("listings", t),
   check("listings_confirmed_base", sql`${t.confirmedBase} between 0 and 3`),
+  ...typeColumnChecks("listings", t),
 ]);
 
 /** Contradicting contents of one mail listing (step-3-design.md core choice 4): the listing row stays as first written. */
@@ -140,6 +160,7 @@ export const listingVersions = pgTable("listing_versions", {
   kindCheck("listing_versions_kind", t.kind),
   ...deadlineChecks("listing_versions", t),
   check("listing_versions_confirmed_base", sql`${t.confirmedBase} between 0 and 3`),
+  ...typeColumnChecks("listing_versions", t),
 ]);
 
 /** Save/skip state; no row means neutral at revision 0. */

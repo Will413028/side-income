@@ -51,9 +51,9 @@ describe("which stored listings the page considers", () => {
     const saved = await listingBy(db, "jobicy", "dropped-saved");
     await db.execute(sql`insert into listing_feedback (listing_id, state, revision) values (${saved!.id}, 'interested', 1)`);
     expect(await shownIds()).toEqual(["kept", "dropped-saved", "mail"]);
-    // Written by a newer image: no contest code exists yet, so the rows are set directly.
-    await db.execute(sql`update listings set opportunity_type = 'contest'`);
-    await db.execute(sql`update listing_versions set opportunity_type = 'contest'`);
+    // Rows of another type, set directly; their job facts are null by the per-type rule (step 5c-2).
+    await db.execute(sql`update listings set opportunity_type = 'contest', category = null, category_score = null, confirmed_base = null`);
+    await db.execute(sql`update listing_versions set opportunity_type = 'contest', category = null, category_score = null, confirmed_base = null`);
     expect(await shownIds()).toEqual([]);
     expect((await rankedPage(db, "job", DEFAULT_SETTINGS, now, "all", 0)).total).toBe(0);
   });

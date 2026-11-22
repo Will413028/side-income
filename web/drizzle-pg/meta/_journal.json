@@ -43,6 +43,13 @@
       "when": 1795310863106,
       "tag": "0005_job_facts_nullable",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795312523116,
+      "tag": "0006_contest_rules",
+      "breakpoints": true
     }
   ]
 }
