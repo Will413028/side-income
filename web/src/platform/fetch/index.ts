@@ -3,18 +3,21 @@
 // tier 2 (`browser_like`) sends the same GET with a browser's TLS and HTTP/2 fingerprint through impit,
 // the HTTP client Crawlee (plan D4) uses; tier 3 (`browser`) asks the browser service (`browser/`, a
 // separate image started with the daily run, plan step 8d) to render the page in Chromium through Crawlee
-// and reads back the HTML and the status of the page's first response. All tiers keep the same rules: no redirects, a timeout over the whole
+// and reads back the HTML and the status of the page's first response; tier 4 (`stealth`) asks the stealth
+// service (`stealth/`, Scrapling's StealthyFetcher; opportunity types plan step 6c-2, D15) the same way, for a
+// source the browser tier's check page blocks. All tiers keep the same rules: no redirects, a timeout over the whole
 // request, a size cap, a minimum interval between this source's requests and a cap on its requests per run.
 // No tier is tried and abandoned on the way up: a source needing tier 2 is blocked at tier 1 every time
 // (spikes.md §2 measured each source's lowest working tier), so starting low would only spend a request,
-// and a source blocked at its highest tier fails (plan step 8: no proxies, no CAPTCHA solving).
+// and a source blocked at its highest tier fails (plan step 8: no proxies, no CAPTCHA solving; the stealth
+// service solves none either, stealth/server.py).
 // One daily run per Taipei day (runs table), so the per-run cap is the daily cap for scheduled runs; a
 // manual run-source.ts adds at most one more run's worth, by hand.
 
 import type { Impit } from "impit";
 
 /** The reading tiers in order, named as run_sources.tier stores them. */
-export const TIERS = ["plain", "browser_like", "browser"] as const;
+export const TIERS = ["plain", "browser_like", "browser", "stealth"] as const;
 export type Tier = (typeof TIERS)[number];
 
 export type FetchPolicy = {
@@ -31,14 +34,14 @@ export type FetchRequest = {
   headers?: Record<string, string>;
   maxBytes: number;
   timeoutMs: number;
-  /** Tier 3 only: a CSS selector the rendered page must show before it is read (other tiers ignore it). */
+  /** Tiers 3 and 4 only: a selector the rendered page must show before it is read (other tiers ignore it). */
   waitFor?: string;
 };
 export type FetchResponse = { status: number; body: Uint8Array; tier: Tier };
 
 /**
  * Why a read failed; step 6 retries the transient kinds (network, timeout, HTTP 429 and 5xx).
- * browser_tier (step 8d) is a lasting tier-3 failure a retry cannot fix: no service configured or
+ * browser_tier (step 8d) is a lasting failure of a render tier (3 or 4) a retry cannot fix: no service configured or
  * reachable, a request the service refuses, or a page whose waitFor selector never appeared (layout changed).
  */
 export type FetchErrorKind = "invalid_url" | "network" | "timeout" | "http_status" | "too_large" | "request_limit" | "browser_tier";
@@ -72,7 +75,7 @@ const browserLike: Transport = async (url, { headers, signal }) => {
 };
 const plain: Transport = (url, { headers, signal }) => fetch(url, { headers, signal, redirect: "manual" });
 
-/** The service's own limit on a render (browser/server.mjs MAX_TIMEOUT_MS). */
+/** The services' own limit on a render (MAX_TIMEOUT_MS in browser/server.mjs and stealth/server.py). */
 const SERVICE_MAX_MS = 120_000;
 /**
  * The service's budget: 5 s under this request's own timeout (at least half of it), so the service's 504
@@ -84,16 +87,16 @@ export const serviceBudget = (timeoutMs: number) => Math.min(SERVICE_MAX_MS, Mat
 const UNREACHABLE = new Set(["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED"]);
 
 /**
- * Tier 3: one POST to the browser service (contract in browser/server.mjs). The page's own status comes
+ * Tiers 3 and 4: one POST to a render service (contract in browser/server.mjs; stealth/server.py keeps the same). The page's own status comes
  * back in x-upstream-status, so a blocked page is an http_status failure like on the other tiers. The
  * service's 504 is a timeout and its 5xx a network failure (both transient); a missing or unreachable
  * service, a refused request (4xx) and a missing waitFor selector (422) are browser_tier (not retried).
- * BROWSER_URL is set for the daily service only (deploy/compose.yaml). No headers are sent: the
+ * BROWSER_URL and STEALTH_URL are set for the daily service only (deploy/compose.yaml). No headers are sent: the
  * fingerprint sets them (browser/server.mjs).
  */
-export const browserTier = (service: () => string | undefined = () => process.env.BROWSER_URL): Transport => async (url, { signal, timeoutMs, waitFor }) => {
+const renderTier = (name: "browser" | "stealth", variable: string, service: () => string | undefined): Transport => async (url, { signal, timeoutMs, waitFor }) => {
   const base = service();
-  if (!base) throw new FetchError("browser_tier", "BROWSER_URL is not set");
+  if (!base) throw new FetchError("browser_tier", `${variable} is not set`);
   let r: Response;
   try {
     r = await fetch(`${base}/render`, {
@@ -105,20 +108,22 @@ export const browserTier = (service: () => string | undefined = () => process.en
     });
   } catch (e) {
     const code = ((e as Error).cause as { code?: string } | undefined)?.code;
-    if (code && UNREACHABLE.has(code)) throw new FetchError("browser_tier", `browser service unreachable (${code})`);
+    if (code && UNREACHABLE.has(code)) throw new FetchError("browser_tier", `${name} service unreachable (${code})`);
     throw e;
   }
   const upstream = Number(r.headers.get("x-upstream-status"));
   if (r.status !== 200 || !Number.isInteger(upstream) || upstream < 100) {
     await r.body?.cancel();
-    if (r.status === 504) throw new FetchError("timeout", "browser tier timed out");
+    if (r.status === 504) throw new FetchError("timeout", `${name} tier timed out`);
     if (r.status === 422) throw new FetchError("browser_tier", "waitFor selector never appeared (layout changed?)", 422);
-    if (r.status >= 400 && r.status < 500) throw new FetchError("browser_tier", `browser service refused the request (${r.status})`, r.status);
-    throw new FetchError("network", `browser service answered ${r.status}`);
+    if (r.status >= 400 && r.status < 500) throw new FetchError("browser_tier", `${name} service refused the request (${r.status})`, r.status);
+    throw new FetchError("network", `${name} service answered ${r.status}`);
   }
   return { status: upstream, body: r.body };
 };
-const TRANSPORTS: Record<Tier, Transport> = { plain, browser_like: browserLike, browser: browserTier() };
+export const browserTier = (service: () => string | undefined = () => process.env.BROWSER_URL) => renderTier("browser", "BROWSER_URL", service);
+export const stealthTier = (service: () => string | undefined = () => process.env.STEALTH_URL) => renderTier("stealth", "STEALTH_URL", service);
+const TRANSPORTS: Record<Tier, Transport> = { plain, browser_like: browserLike, browser: browserTier(), stealth: stealthTier() };
 
 type Clock = { now(): number; sleep(ms: number): Promise<void> };
 const realClock: Clock = { now: () => Date.now(), sleep: (ms) => new Promise((r) => setTimeout(r, ms)) };

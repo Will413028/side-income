@@ -29,6 +29,24 @@ Before cutover (plan step 10) the migrations may be regenerated in place (`web/d
 
 The first deploy of step 8d runs the previous `deploy.sh`, which does not build this image: in the same authorized session, build it by hand with `docker build -f deploy/browser.Dockerfile -t "<APP_IMAGE>-browser" browser`.
 
+## Stealth tier
+
+`stealth` (opportunity types plan step 6c-2, D15) renders pages for the sources whose `maxTier` is `stealth`: Scrapling's `StealthyFetcher` in Scrapling's official image pinned by digest, image `${APP_IMAGE}-stealth` built by `deploy.sh` from `stealth/` (`deploy/stealth.Dockerfile`). It keeps the browser tier's rules: no published port, its own `stealth` network shared only with `daily` (`STEALTH_URL=http://stealth:3100`), not a dependency of `daily`, started by the unit's `ExecStartPre` and removed by its `ExecStopPost` (`deploy/check-compose.mjs` fails when the unit does not do both), limit 1 GB. It runs as its own user, solves no challenge and uses no proxy (`stealth/server.py`). For a manual `run-source.ts` of a stealth source, start and remove it as for `browser`, with `stealth` as the service name.
+
+The first deploy of step 6c-2 runs the previous `deploy.sh`, which does not build this image, and the previous unit file, which does not start it: in the same authorized session, build it by hand with `docker build -f deploy/stealth.Dockerfile -t "<APP_IMAGE>-stealth" stealth` and install the unit again (`install` and `daemon-reload`). When old images are removed by hand, `<tag>-stealth` goes with its `<tag>` and `<tag>-browser`.
+
+One render by hand (status and markers only; page content is not kept):
+
+```bash
+docker compose --env-file /etc/side-income/compose.env -f deploy/compose.yaml --profile jobs up -d --wait stealth
+docker compose --env-file /etc/side-income/compose.env -f deploy/compose.yaml run --rm -T daily node --input-type=module -e "
+  const r = await fetch(process.env.STEALTH_URL + '/render', { method: 'POST', body: JSON.stringify({ url: process.argv[1], timeoutMs: 60000 }) });
+  const html = await r.text();
+  console.log(r.status, r.headers.get('x-upstream-status'), r.headers.get('x-error'), html.length, /captcha/i.test(html));
+" "<url>" </dev/null
+docker compose --env-file /etc/side-income/compose.env -f deploy/compose.yaml --profile jobs rm --stop --force stealth
+```
+
 ## Tailscale Serve
 
 ```bash

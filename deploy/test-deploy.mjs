@@ -7,7 +7,7 @@
 // rest of a script read from stdin; the failure and rollback scenarios run that way too.
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, readFileSync, chmodSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, chmodSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,9 +17,12 @@ const script = fileURLToPath(new URL("./deploy.sh", import.meta.url));
 const dirs = [];
 after(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
 
-function setup() {
+function setup({ stealth = true } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "deploy-test-"));
   dirs.push(dir);
+  // The target commit's files, as far as deploy.sh looks at them (the stub git checkout moves none).
+  mkdirSync(join(dir, "deploy"));
+  if (stealth) writeFileSync(join(dir, "deploy", "stealth.Dockerfile"), "");
   const envFile = join(dir, "compose.env");
   const calls = join(dir, "calls.log");
   const head = join(dir, "head");
@@ -67,8 +70,8 @@ exit 0
   return { dir, envFile, calls, head };
 }
 
-function run(extraEnv = {}, target = "new5678full", { scriptOnStdin = false } = {}) {
-  const ctx = setup();
+function run(extraEnv = {}, target = "new5678full", { scriptOnStdin = false, stealth = true } = {}) {
+  const ctx = setup({ stealth });
   const args = scriptOnStdin ? ["-s", target] : [script, target];
   const r = spawnSync("bash", args, {
     input: scriptOnStdin ? readFileSync(script, "utf8") : undefined,
@@ -113,6 +116,19 @@ test("builds the browser tier as the app image's tag plus -browser (plan step 8d
   assert.match(r.calls, / build -f deploy\/browser\.Dockerfile -t side-income-web:new5678-browser browser$/m);
 });
 
+test("builds the stealth tier as the app image's tag plus -stealth (opportunity types plan step 6c-2)", () => {
+  const r = run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.calls, / build -f deploy\/stealth\.Dockerfile -t side-income-web:new5678-stealth stealth$/m);
+});
+
+test("a target commit without the stealth tier deploys without building it (rollback to an older sha)", () => {
+  const r = run({}, undefined, { stealth: false });
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.calls, /stealth/);
+  assert.match(r.env, /^APP_IMAGE=side-income-web:new5678$/m);
+});
+
 test("a branch name deploys the fetched origin branch", () => {
   const r = run({}, "dev");
   assert.equal(r.status, 0, r.stderr);
@@ -120,7 +136,7 @@ test("a branch name deploys the fetched origin branch", () => {
 });
 
 for (const scriptOnStdin of [false, true]) test(`failed build or migration leaves APP_IMAGE, the checkout and web untouched${scriptOnStdin ? " (script on stdin)" : ""}`, () => {
-  for (const env of [{ FAKE_BUILD_FAIL: "web.Dockerfile" }, { FAKE_BUILD_FAIL: "browser.Dockerfile" }, { FAKE_MIGRATE_FAIL: "1" }]) {
+  for (const env of [{ FAKE_BUILD_FAIL: "web.Dockerfile" }, { FAKE_BUILD_FAIL: "browser.Dockerfile" }, { FAKE_BUILD_FAIL: "stealth.Dockerfile" }, { FAKE_MIGRATE_FAIL: "1" }]) {
     const r = run(env, undefined, { scriptOnStdin });
     assert.equal(r.status, 1);
     assert.match(r.env, OLD);

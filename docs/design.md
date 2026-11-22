@@ -20,6 +20,7 @@ flowchart LR
   T[systemd timer 09:00 / 11:00] --> J["scripts/daily.ts（web 映像的一次性容器）"]
   S[公開 API / RSS / 頁面] --> J
   B["browser/ 渲染服務（第 3 層）"] --> J
+  K["stealth/ 渲染服務（第 4 層）"] --> J
   M[Resend Receiving 職缺通知信] --> J
   J --> D[(Postgres)]
   D --> U[Next.js 頁面：清單 / 詳情 / 來源 / 設定]
@@ -46,6 +47,7 @@ web/src/
   platform/     分層讀取（fetch/）、錯誤型別、文字工具
 web/scripts/    daily.ts（每日執行）、run-source.ts（手動跑一個來源）、migrate-pg.ts
 browser/        第 3 層的渲染服務（獨立映像，Crawlee 加 Chromium）
+stealth/        第 4 層的渲染服務（獨立映像，Python，Scrapling 的 StealthyFetcher）
 deploy/         compose、Dockerfile、systemd 單元、deploy.sh
 ```
 
@@ -104,6 +106,7 @@ deploy/         compose、Dockerfile、systemd 單元、deploy.sh
 1. `plain`：Node 的 fetch。
 2. `browser_like`：同樣的 GET，經 impit 帶瀏覽器的 TLS 與 HTTP/2 特徵。
 3. `browser`：請 `browser/` 服務用 Chromium 渲染頁面，取回 HTML 與第一個回應的狀態。
+4. `stealth`：請 `stealth/` 服務用 Scrapling 的 StealthyFetcher（降低被辨識為自動化的瀏覽器）渲染頁面，介面與第 3 層相同。只給第 3 層會被檢查頁擋下的來源（機會類型計畫 D15）；服務只有一處呼叫 Scrapling，參數固定：不解驗證、不用代理、不帶 cookie 或登入資料、不重試、不送假的來源頁（referer），遇到檢查頁就原樣回傳，由來源判定失敗。每次渲染在自己的子行程裡跑，到期就連瀏覽器一起結束。
 
 各層同樣不跟隨轉址、整個請求有逾時、有大小上限、同來源請求有最小間隔、每次執行有請求數上限。在最高層也被擋的來源就是失敗，不再往上找辦法（不用代理、不解 CAPTCHA）。
 

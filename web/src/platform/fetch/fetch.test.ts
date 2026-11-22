@@ -1,12 +1,13 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { browserTier, createFetcher, serviceBudget, FetchError, TIERS, type FetchPolicy, type Tier, type Transport } from ".";
+import { browserTier, stealthTier, createFetcher, serviceBudget, FetchError, TIERS, type FetchPolicy, type Tier, type Transport } from ".";
 
 // Plan step 4 (tier 1), step 8c (tier 2, browser_like) and step 8d (tier 3, browser): each tier's real
 // transport against a local server, so all keep the same rules; then the tier choice itself with stub
 // transports. Tier 3's service is a stand-in that reads the page with a plain fetch and answers with the
-// contract of browser/server.mjs (the real service is tested in browser/ and run on the VM).
+// contract of browser/server.mjs (the real service is tested in browser/ and run on the VM). Tier 4
+// (stealth, opportunity types plan step 6c-2) keeps the same contract, so the same stand-in answers for it.
 let server: Server, base = "";
 let service: Server;
 const renders: unknown[] = [];
@@ -41,10 +42,11 @@ beforeAll(async () => {
     }
   });
   await new Promise<void>((resolve) => service.listen(0, "127.0.0.1", resolve));
-  process.env.BROWSER_URL = `http://127.0.0.1:${(service.address() as AddressInfo).port}`;
+  process.env.BROWSER_URL = process.env.STEALTH_URL = `http://127.0.0.1:${(service.address() as AddressInfo).port}`;
 });
 afterAll(async () => {
   delete process.env.BROWSER_URL;
+  delete process.env.STEALTH_URL;
   service.closeAllConnections();
   await new Promise<void>((resolve) => service.close(() => resolve()));
   await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -131,7 +133,7 @@ describe("tier choice (plan step 8c)", () => {
 
   it("reads with the source's highest tier only and reports it", async () => {
     const log: string[] = [];
-    const f = createFetcher({ maxTier: "browser_like", minIntervalMs: 0, maxRequestsPerRun: 2 }, undefined, { plain: stub(403, log, "plain"), browser_like: stub(200, log, "browser_like"), browser: stub(200, log, "browser") });
+    const f = createFetcher({ maxTier: "browser_like", minIntervalMs: 0, maxRequestsPerRun: 2 }, undefined, { plain: stub(403, log, "plain"), browser_like: stub(200, log, "browser_like"), browser: stub(200, log, "browser"), stealth: stub(200, log, "stealth") });
     expect([(await f.get(req)).tier, log]).toEqual(["browser_like", ["browser_like"]]);
   });
 
@@ -139,7 +141,7 @@ describe("tier choice (plan step 8c)", () => {
     for (const blocked of [403, 0]) {
       const log: string[] = [];
       const reset: Transport = async () => (log.push("plain"), Promise.reject(Object.assign(new Error("reset"), { name: "TypeError" })));
-      const f = createFetcher({ maxTier: "plain", minIntervalMs: 0, maxRequestsPerRun: 5 }, undefined, { plain: blocked ? stub(blocked, log, "plain") : reset, browser_like: stub(200, log, "browser_like"), browser: stub(200, log, "browser") });
+      const f = createFetcher({ maxTier: "plain", minIntervalMs: 0, maxRequestsPerRun: 5 }, undefined, { plain: blocked ? stub(blocked, log, "plain") : reset, browser_like: stub(200, log, "browser_like"), browser: stub(200, log, "browser"), stealth: stub(200, log, "stealth") });
       const e = await failure(f.get(req));
       expect([e.kind, log, f.requests]).toEqual([blocked ? "http_status" : "network", ["plain"], 1]);
     }
@@ -172,7 +174,7 @@ describe("browser tier service (plan step 8d)", () => {
 
   it("no service configured, or none listening, is browser_tier, not retried", async () => {
     renders.length = 0;
-    const one = (svc: () => string | undefined) => failure(createFetcher(policy, undefined, { plain: browserTier(), browser_like: browserTier(), browser: browserTier(svc) }).get({ url: `${base}/ok`, maxBytes: 100, timeoutMs: 2000 }));
+    const one = (svc: () => string | undefined) => failure(createFetcher(policy, undefined, { plain: browserTier(), browser_like: browserTier(), browser: browserTier(svc), stealth: stealthTier() }).get({ url: `${base}/ok`, maxBytes: 100, timeoutMs: 2000 }));
     const missing = await one(() => undefined);
     // A port nothing listens on (port 1 is on fetch's blocked-port list, so it never connects at all).
     const idle = createServer();
@@ -181,5 +183,50 @@ describe("browser tier service (plan step 8d)", () => {
     await new Promise<void>((resolve) => idle.close(() => resolve()));
     const down = await one(() => `http://127.0.0.1:${port}`);
     expect([missing.kind, missing.transient, down.kind, down.transient, renders]).toEqual(["browser_tier", false, "browser_tier", false, []]);
+  });
+});
+
+describe("stealth tier service (opportunity types plan step 6c-2)", () => {
+  const policy: FetchPolicy = { maxTier: "stealth", minIntervalMs: 0, maxRequestsPerRun: 10 };
+  const get = (f = createFetcher(policy), path = "/ok") => f.get({ url: `${base}${path}`, maxBytes: 100, timeoutMs: 30_000, waitFor: ".contest", headers: { "User-Agent": "x" } });
+
+  it("reads through the service at STEALTH_URL, not the browser tier's, with the same request", async () => {
+    const browserUrl = process.env.BROWSER_URL;
+    delete process.env.BROWSER_URL;
+    try {
+      renders.length = 0;
+      expect((await get()).tier).toBe("stealth");
+      expect(renders).toEqual([{ url: `${base}/ok`, timeoutMs: 25_000, waitFor: ".contest" }]);
+    } finally {
+      process.env.BROWSER_URL = browserUrl;
+    }
+  });
+
+  it("without STEALTH_URL a stealth source fails as browser_tier and never falls back to the browser tier", async () => {
+    const stealthUrl = process.env.STEALTH_URL;
+    delete process.env.STEALTH_URL;
+    try {
+      renders.length = 0;
+      const e = await failure(get());
+      expect([e.kind, e.transient, e.message, renders]).toEqual(["browser_tier", false, "STEALTH_URL is not set", []]);
+    } finally {
+      process.env.STEALTH_URL = stealthUrl;
+    }
+  });
+
+  it("a browser-tier source never reads through the stealth service", async () => {
+    const seen: string[] = [];
+    const other = createServer((_req, res) => (seen.push("stealth"), res.writeHead(200, { "x-upstream-status": "200" }).end("x")));
+    await new Promise<void>((resolve) => other.listen(0, "127.0.0.1", resolve));
+    const transports = { plain: browserTier(), browser_like: browserTier(), browser: browserTier(), stealth: stealthTier(() => `http://127.0.0.1:${(other.address() as AddressInfo).port}`) };
+    try {
+      expect((await get(createFetcher({ ...policy, maxTier: "browser" }, undefined, transports))).tier).toBe("browser");
+      expect(seen).toEqual([]);
+      expect((await get(createFetcher(policy, undefined, transports))).tier).toBe("stealth");
+      expect(seen).toEqual(["stealth"]);
+    } finally {
+      other.closeAllConnections();
+      await new Promise<void>((resolve) => other.close(() => resolve()));
+    }
   });
 });
