@@ -14,10 +14,12 @@ import { SourceError, type Collected, type PageSourceSettings } from "../types";
 // not read), the list rows say only when they started (`20 days ago`). The deadline is on each competition's
 // page: its timeline gives `<Month D, YYYY> - Final Submission Deadline` (or the label first) and the note
 // `All deadlines are at 11:59 PM UTC on the corresponding day`, so the deadline is 23:59 UTC that day (a date
-// without the note, D12); the entry deadline is the registration deadline. The page's `Close` field says
-// `N … to go` while it is open and a date once closed. Kaggle's check page has no competition link, so a
-// render waiting for one answers 422 first: a block then shows as `browser_tier` (http_422), and the check
-// page's title in shared/job-pages.ts is a backstop for a render that returns it. These dates are text in the page, not times the browser renders, so the render's zone does
+// without the note, D12); the entry deadline is the registration deadline. Community-hosted pages have no such
+// timeline: their host's `Final submission deadline: <date> [at HH:MM UTC]` line is read, any other wording is
+// not, and an open one is then stored with the deadline unknown. The page's `Close` field says
+// `N … to go` while it is open and a date once closed. A check page fails the source: on the list it has no
+// competition link (the render answers 422, shown as `browser_tier`), on a competition page it is caught by its
+// title (shared/job-pages.ts) or by having neither a `Close` field nor a deadline. These dates are text in the page, not times the browser renders, so the render's zone does
 // not matter (D16 applies to the browser tier's zone-free times only).
 
 export const ORIGIN = "https://www.kaggle.com";
@@ -118,7 +120,7 @@ function dateFor(text: string, label: string): string | null {
  * pages); any other wording is not read.
  */
 function colonDeadline(text: string): ContestInput["deadline"] {
-  const m = new RegExp(`Final submission deadline:\\s*${DATE}(?:(?: at|,)\\s*(\\d{1,2}):(\\d{2})\\s*(AM|PM)?\\s*UTC)?`, "i").exec(text);
+  const m = new RegExp(`Final submission deadline:\\s*${DATE}(?:(?: at|,)\\s*(\\d{1,2}):(\\d{2})\\s*(AM|PM)?\\s*UTC(?![+\\-−]\\s*\\d))?`, "i").exec(text);
   const date = m ? isoDate(m[1], m[2], m[3]) : null;
   if (!m || !date) return null;
   if (m[4] === undefined) return { kind: "date", date };
@@ -129,7 +131,7 @@ function colonDeadline(text: string): ContestInput["deadline"] {
   return { kind: "instant", at: `${date}T${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}:00.000Z` };
 }
 
-export type Detail = { open: boolean | null; deadline: ContestInput["deadline"]; entry: string | null; title: string | null; host: string | null };
+export type Detail = { open: boolean | null; deadline: ContestInput["deadline"]; entry: string | null; title: string | null; host: string | null; standard: boolean };
 
 export function parseDetail(html: string): Detail {
   const text = htmlText(html);
@@ -146,7 +148,9 @@ export function parseDetail(html: string): Detail {
   const entry = /Entry Deadline\s*-\s*Same as the Final Submission Deadline/.test(text) ? final : dateFor(text, "Entry Deadline");
   const title = $("h1").first().text().trim() || null;
   const host = /Competition Host\s*(.{1,200}?)\s*Prizes & Awards/.exec(text)?.[1].trim() ?? null;
-  return { open, deadline: final ? (utc ? { kind: "instant", at: `${final}T23:59:00.000Z` } : { kind: "date", date: final }) : colon, entry, title, host };
+  // Kaggle's own timeline carries this label; a community host's page does not (measured 2026-11-22).
+  const standard = text.includes("Final Submission Deadline");
+  return { open, deadline: final ? (utc ? { kind: "instant", at: `${final}T23:59:00.000Z` } : { kind: "date", date: final }) : colon, entry, title, host, standard };
 }
 
 export function normalize(card: Card, detail: Detail): ContestInput {
@@ -174,21 +178,24 @@ export async function scan(fetcher: Fetcher): Promise<{ seen: number; listings: 
   // overwrite a stored one); the read is then truncated.
   const read = open.slice(0, MAX_DETAILS);
   const listings: ContestInput[] = [];
-  let rejected = 0, examined = 0, rendered = 0, deadlines = 0;
+  let rejected = 0, examined = 0, rendered = 0, standard = 0;
   for (const c of read) {
     examined++;
     try {
       const detail = parseDetail(pageHtml("kaggle", (await fetcher.get(renderRequest(`${ORIGIN}/competitions/${c.slug}`, DETAIL_WAIT))).body));
       rendered++;
-      if (detail.deadline) deadlines++;
-      // A page that shows itself closed is left out. An open page without a deadline in a form read here
-      // (community hosts write it in their own words) is stored with the deadline unknown; one whose open
-      // state is not readable either is set aside.
+      if (detail.standard) standard++;
+      // Every competition page shows its `Close` field: a page with neither it nor a deadline is not one
+      // (a check page the title pattern does not know), so the source is blocked, not one page.
+      if (detail.open === null && !detail.deadline) throw new AccessChallenge("kaggle: a page that is not a competition page");
+      // A page that shows itself closed is left out. An open community page (no Kaggle timeline label) whose
+      // host writes the deadline in other words is stored with the deadline unknown; a page with Kaggle's
+      // timeline whose deadline is not read is set aside, so a deadline stored by an earlier read is kept.
       if (detail.open === false) {
         examined--;
         continue;
       }
-      if (!detail.deadline && detail.open !== true) throw new SourceError("kaggle: no final submission deadline");
+      if (!detail.deadline && (detail.standard || detail.open !== true)) throw new SourceError("kaggle: no final submission deadline");
       listings.push(normalize(c, detail));
     } catch (e) {
       // One page that fails to render or read is set aside (counted; services/collect fails the run when
@@ -200,9 +207,9 @@ export async function scan(fetcher: Fetcher): Promise<{ seen: number; listings: 
       rejected++;
     }
   }
-  // No final submission deadline on any page read means the page layout (or its render) changed: fail the
-  // run rather than set every competition aside.
-  if (rendered > 0 && deadlines === 0) throw new SourceError("kaggle: no detail page shows a final submission deadline");
+  // No page with Kaggle's own timeline label means the page layout (or its render) changed: fail the run
+  // rather than store every competition without its deadline.
+  if (rendered > 0 && standard === 0) throw new SourceError("kaggle: no detail page shows a final submission deadline");
   return { seen: open.length, listings, truncated: open.length > MAX_DETAILS, rejected, examined };
 }
 

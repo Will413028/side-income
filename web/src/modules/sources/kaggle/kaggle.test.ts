@@ -77,7 +77,7 @@ describe("kaggle list", () => {
 
 describe("kaggle detail", () => {
   it("reads the final submission and entry deadlines, with the UTC note, the open state and the host", () => {
-    expect(parseDetail(fixture("detail.html"))).toEqual({ open: true, deadline: { kind: "instant", at: "2026-12-02T23:59:00.000Z" }, entry: "2026-11-25", title: "Example Agent Competition", host: "Example Host" });
+    expect(parseDetail(fixture("detail.html"))).toEqual({ open: true, deadline: { kind: "instant", at: "2026-12-02T23:59:00.000Z" }, entry: "2026-11-25", title: "Example Agent Competition", host: "Example Host", standard: true });
   });
 
   it("reads the date after the label too, and an entry deadline that is the final one", () => {
@@ -98,14 +98,15 @@ describe("kaggle detail", () => {
       parseDetail(page("Final submission deadline: March 3, 2027.")).deadline,
       parseDetail(page("Final submission deadline: March 3, 2027 at 25:00 UTC.")).deadline,
       parseDetail(page("Submission deadline: 23:59, November 20, 2026 (UTC+8)")).deadline,
+      parseDetail(page("Final submission deadline: January 20, 2027 at 23:59 UTC+8.")).deadline,
     ]).toEqual([
-      { kind: "instant", at: "2027-01-20T10:00:00.000Z" }, { kind: "instant", at: "2027-02-17T23:59:00.000Z" }, { kind: "date", date: "2027-03-03" }, null, null,
+      { kind: "instant", at: "2027-01-20T10:00:00.000Z" }, { kind: "instant", at: "2027-02-17T23:59:00.000Z" }, { kind: "date", date: "2027-03-03" }, null, null, { kind: "date", date: "2027-01-20" },
     ]);
   });
 
   it("reads a closed competition (an absolute close date) as not open, and a page without a close field as unknown", () => {
     expect(parseDetail(LATE).open).toBe(false);
-    expect(parseDetail("<h1>T</h1><p>nothing</p>")).toEqual({ open: null, deadline: null, entry: null, title: "T", host: null });
+    expect(parseDetail("<h1>T</h1><p>nothing</p>")).toEqual({ open: null, deadline: null, entry: null, title: "T", host: null, standard: false });
     expect(parseDetail("<h1>T</h1><p>February 30, 2027 - Final Submission Deadline.</p>").deadline).toBeNull();
   });
 });
@@ -135,9 +136,12 @@ describe("kaggle pages", () => {
     const closed = await scan(serving({ ...site(), [detailUrl("example-bowl")]: LATE }));
     expect([closed.listings.map((l) => l.external_id), closed.rejected, closed.examined]).toEqual([["example-agent"], 0, 1]);
     const bare = await scan(serving({ ...site(), [detailUrl("example-bowl")]: "<h1>Example Bowl</h1><span>Close</span><span>2 months to go</span><p>The host's own words about the deadline.</p>" }));
-    expect([bare.listings.map((l) => [l.external_id, l.deadline]), bare.rejected]).toEqual([[["example-agent", { kind: "instant", at: "2026-12-02T23:59:00.000Z" }], ["example-bowl", null]], 0]);
-    const neither = await scan(serving({ ...site(), [detailUrl("example-bowl")]: "<h1>Example Bowl</h1><p>nothing readable</p>" }));
-    expect([neither.listings.map((l) => l.external_id), neither.rejected, neither.examined]).toEqual([["example-agent"], 1, 2]);
+    expect([bare.listings.map((l) => [l.external_id, l.deadline]), bare.rejected, bare.examined]).toEqual([[["example-agent", { kind: "instant", at: "2026-12-02T23:59:00.000Z" }], ["example-bowl", null]], 0, 2]);
+    // Kaggle's own timeline whose date is not read: set aside, so a stored deadline is kept.
+    const unread = await scan(serving({ ...site(), [detailUrl("example-bowl")]: "<h1>Example Bowl</h1><span>Close</span><span>2 months to go</span><p>Final Submission Deadline - to be announced</p>" }));
+    expect([unread.listings.map((l) => l.external_id), unread.rejected, unread.examined]).toEqual([["example-agent"], 1, 2]);
+    // Neither a Close field nor a deadline: not a competition page, so the source is blocked.
+    await expect(scan(serving({ ...site(), [detailUrl("example-bowl")]: "<h1>Verify you are human</h1><p>nothing readable</p>" }))).rejects.toThrow(/not a competition page/);
   });
 
   it("sets aside a page that does not render, and fails the run on the check page or a refusal", async () => {
