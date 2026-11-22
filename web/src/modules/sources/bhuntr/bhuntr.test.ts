@@ -6,7 +6,7 @@ import type { PgDb } from "@/db/pg/client";
 import { listingBy } from "@/modules/listings/public";
 import { FetchError, type Fetcher } from "@/platform/fetch";
 import { collectSource } from "@/services/collect";
-import { BHUNTR_SETTINGS, bhuntrConnector, idOf, LIST_URL, MAX_DETAILS, organiserOf, periodEnd, prizeOf, scan } from ".";
+import { BHUNTR_SETTINGS, bhuntrConnector, DETAIL_WAIT, idOf, LIST_WAIT, LIST_URL, MAX_DETAILS, organiserOf, periodEnd, prizeOf, scan } from ".";
 import { freshPg } from "../../../../tests/helpers/pg";
 
 // Opportunity types plan step 6c-1. fixtures/ is the connector's ground truth: synthetic pages shaped on the
@@ -53,6 +53,11 @@ describe("bhuntr readers", () => {
 });
 
 describe("bhuntr pages", () => {
+  it("waits for visible elements: the render service waits until its selector is visible, which a script never is", () => {
+    for (const sel of [LIST_WAIT, DETAIL_WAIT]) expect(sel).not.toMatch(/^\s*(script|meta|link|head|style|template)\b/i);
+    expect(DETAIL_WAIT).toBe("text=徵件期間");
+  });
+
   it("renders the list, then only the open cards' pages, and keeps their end, organiser and prize", async () => {
     const f = serving(site());
     const got = await bhuntrConnector(f);

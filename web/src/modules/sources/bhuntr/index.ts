@@ -20,7 +20,12 @@ import { SourceError, type Collected, type PageSourceSettings } from "../types";
 export const ORIGIN = "https://bhuntr.com";
 export const LIST_URL = `${ORIGIN}/tw/competitions`;
 export const LIST_WAIT = "a.bh-title";
-export const DETAIL_WAIT = 'script[type="application/ld+json"]';
+/**
+ * The period's label: the render service waits for a visible match (Playwright's default), so a `<script>`
+ * never matches (the first VM run answered 422, 2026-11-22); `text=` is Playwright's text selector, measured
+ * on the VM the same day.
+ */
+export const DETAIL_WAIT = "text=徵件期間";
 /** Detail pages read per run (24 open cards on 2026-11-22); more is a truncated read. */
 export const MAX_DETAILS = 30;
 
