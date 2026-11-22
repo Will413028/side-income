@@ -160,8 +160,12 @@ class FakePage:
     main_frame = "main"
 
     def __init__(self, wait_error=None):
-        self.listeners, self.waits, self.wait_error = [], [], wait_error
+        self.listeners, self.waits, self.idle, self.wait_error = [], [], [], wait_error
         self.first = self
+
+    def wait_for_load_state(self, state, timeout):
+        self.idle.append((state, timeout))
+        raise TimeoutError_("still busy")
 
     def on(self, event, fn):
         self.listeners.append((event, fn))
@@ -208,9 +212,10 @@ class FetchPage(unittest.TestCase):
         self.assertEqual(url, "https://example.com/c")
         self.assertIs(kwargs["solve_cloudflare"], False)
         # Exactly these: no proxy (no IP rotation), no cookies or user data (no login), no headers.
-        self.assertEqual(sorted(kwargs), ["headless", "network_idle", "page_action", "page_setup", "retries", "solve_cloudflare", "timeout"])
-        # One attempt: a failed render is not read again behind the source's request cap.
-        self.assertEqual((kwargs["headless"], kwargs["network_idle"], kwargs["retries"]), (True, True, 1))
+        self.assertEqual(sorted(kwargs), ["google_search", "headless", "network_idle", "page_action", "page_setup", "retries", "solve_cloudflare", "timeout"])
+        # One attempt: a failed render is not read again behind the source's request cap. No Google
+        # referer, and the idle wait is the service's own (bounded), not Scrapling's.
+        self.assertEqual([kwargs[k] for k in ("headless", "network_idle", "retries", "google_search")], [True, False, 1, False])
         self.assertTrue(0 < kwargs["timeout"] <= 30_000 - server.MARGIN_MS)
 
     def test_the_status_is_the_first_navigation_response_of_the_main_frame(self):
@@ -228,6 +233,22 @@ class FetchPage(unittest.TestCase):
         (selector, kwargs), = fetcher.page.waits
         self.assertEqual((selector, kwargs["state"]), (".list", "visible"))
         self.assertTrue(0 < kwargs["timeout"] <= 10_000 - server.MARGIN_MS)
+
+    def test_a_page_that_never_goes_quiet_is_still_read_after_a_bounded_wait(self):
+        fetcher = FakeFetcher([FakeResponse(200)], body=b"<p>busy</p>")
+        self.assertEqual(server.fetch_page(fetcher, "https://e.com", ".list", later(60_000)), (200, b"<p>busy</p>"))
+        (state, timeout), = fetcher.page.idle
+        self.assertEqual((state, timeout), ("networkidle", server.IDLE_MS))
+        self.assertEqual(len(fetcher.page.waits), 1)
+        short = FakeFetcher([FakeResponse(200)])
+        server.fetch_page(short, "https://e.com", None, later(5_000))
+        self.assertTrue(0 < short.page.idle[0][1] <= (5_000 - server.MARGIN_MS) // 2)
+
+    def test_no_time_left_for_the_selector_is_a_timeout_not_a_layout_change(self):
+        fetcher = FakeFetcher([FakeResponse(200)], FakePage(TimeoutError_("x")))
+        with self.assertRaises(RenderTimeout):
+            server.fetch_page(fetcher, "https://e.com", ".list", later(server.MARGIN_MS + server.MIN_WAIT_MS - 200))
+        self.assertEqual(fetcher.page.waits, [])
 
     def test_a_selector_that_times_out_is_LayoutMissing_though_the_fetcher_swallows_it(self):
         fetcher = FakeFetcher([FakeResponse(200)], FakePage(TimeoutError_("x")))
@@ -270,8 +291,9 @@ class Child(unittest.TestCase):
                 server.render_in_child({**self.REQUEST, "deadline": later()}, child(code))
 
     def test_at_the_deadline_the_child_and_what_it_started_are_killed(self):
-        # The child starts a grandchild (as the fetcher starts Chromium) and both outlive the deadline.
-        code = ("import subprocess,sys,time; p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']);"
+        # The child starts a grandchild in a session of its own (as the driver starts Chromium) and both
+        # outlive the deadline.
+        code = ("import subprocess,sys,time; p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'], start_new_session=True);"
                 "sys.stderr.write(str(p.pid)+'\\n'); sys.stderr.flush(); time.sleep(60)")
         read, write = os.pipe()
         started = time.time()

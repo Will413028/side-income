@@ -123,8 +123,9 @@ jobs:
       - name: Stealth tier renders a page
         run: |
           docker rm --force browser
-          # The pages by address, not by container name (a first run by name ended in ERR_CONNECTION_REFUSED).
-          docker run -d --name hang --network smoke alpine:3.22 nc -lk -p 80
+          # A listener that accepts and never answers. The pages are read by address: by container name the
+          # same page ended in ERR_CONNECTION_REFUSED (cause not established; the sources are public hosts).
+          docker run -d --name hang --network smoke alpine:3.22 nc -lk -p 80 -e sleep 600
           ip() { docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$1"; }
           page=$(ip page); hang=$(ip hang); echo "page $page, hang $hang"
           render() { curl -sS -m 90 -X POST http://127.0.0.1:3101/render -d "{\"url\":\"http://$1\",\"timeoutMs\":$2${3:+,\"waitFor\":\"$3\"}}" "${@:4}"; }
@@ -145,6 +146,7 @@ jobs:
           # A page that never answers (a listener that accepts and says nothing): 504 whether the navigation
           # gives up first (8 s) or the deadline kills the render with its browser open (3 s), and no browser
           # is left behind either way.
+          test "$(docker inspect -f '{{.State.Running}}' hang)" = true
           for ms in 8000 3000; do
             code=$(render "$hang/" "$ms" "" -o /dev/null -w '%{http_code}')
             echo "no answer within $ms ms: $code"; test "$code" = 504

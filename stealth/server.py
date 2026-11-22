@@ -18,10 +18,9 @@
 # source's connector fails on it.
 #
 # One page at a time, each in its own child process with its own browser: StealthyFetcher's call blocks
-# with only per-operation timeouts, so the deadline over the whole render is kept by killing the child's
-# process group: the child and the browser's driver die there, and the browser, which the driver starts in
-# a group of its own, exits when its driver is gone (CI's image job checks that none is left after a
-# render that ran out of time). Nothing carries over between renders. Only the standard library is
+# with only per-operation timeouts, so the deadline over the whole render is kept by killing the child
+# and everything started under it, the browser included (CI's image job checks that none is left after
+# a render that ran out of time). Nothing carries over between renders. Only the standard library is
 # imported here; Scrapling is imported in the child, so the tests need neither it nor a browser.
 import json
 import os
@@ -41,6 +40,10 @@ MAX_BODY = 64 * 1024
 # Navigation and the waitFor wait end this long before the deadline, so their own timeouts (a missing
 # selector: 422) are seen before the deadline kills the child (504), as in browser/render.mjs.
 MARGIN_MS = 1_500
+# The longest wait for the page's network to go quiet; a page that keeps polling is read after it.
+IDLE_MS = 5_000
+# A selector wait shorter than this proves nothing about the layout: the render ran out of time instead.
+MIN_WAIT_MS = 1_000
 
 
 class RenderTimeout(Exception):
@@ -93,8 +96,11 @@ def fetch_page(fetcher, url, wait_for, deadline):
     """
     first, failure = [], []
 
+    def left():
+        return int(deadline - now_ms() - MARGIN_MS)
+
     def budget():
-        return max(1, int(deadline - now_ms() - MARGIN_MS))
+        return max(1, left())
 
     def page_setup(page):
         # The first hop: a redirect answers with its 3xx, the page with its own status.
@@ -105,22 +111,33 @@ def fetch_page(fetcher, url, wait_for, deadline):
         page.on("response", on_response)
 
     def page_action(page):
-        # Waited for here and not with Scrapling's wait_selector, which logs a selector that never
-        # appears and returns the page anyway; an error raised here is swallowed the same way, so it
-        # is recorded for the check below.
-        if wait_for is None or (first and first[0] != 200):
+        # Both waits are made here and not by Scrapling (network_idle, wait_selector): it gives the idle
+        # wait the whole timeout, so a page that keeps polling would use up the render, and it logs a
+        # selector that never appears and returns the page anyway. An error raised here is swallowed the
+        # same way, so it is recorded for the check below.
+        if first and first[0] != 200:
             return
         try:
-            page.locator(wait_for).first.wait_for(state="visible", timeout=budget())
+            page.wait_for_load_state("networkidle", timeout=max(1, min(IDLE_MS, left() // 2)))
+        except Exception:  # noqa: BLE001
+            pass  # still busy: read what is there
+        if wait_for is None:
+            return
+        if left() < MIN_WAIT_MS:
+            failure.append("RenderTimeout")
+            return
+        try:
+            page.locator(wait_for).first.wait_for(state="visible", timeout=left())
         except Exception as e:  # noqa: BLE001
             failure.append(type(e).__name__)
 
     response = fetcher.fetch(
         url,
         headless=True,
-        network_idle=True,
+        network_idle=False,
         timeout=budget(),
         solve_cloudflare=False,
+        google_search=False,  # Scrapling's default sends a Google referer: no visit is claimed that did not happen
         retries=1,  # one attempt (Scrapling's default is 3): the daily run decides what is read again, within the source's request cap
         page_setup=page_setup,
         page_action=page_action,
@@ -131,6 +148,8 @@ def fetch_page(fetcher, url, wait_for, deadline):
     if failure:
         if failure[0] == "TimeoutError":
             raise LayoutMissing()
+        if failure[0] == "RenderTimeout":
+            raise RenderTimeout()
         raise RenderFailed(failure[0])
     body = response.body
     return status, body if isinstance(body, bytes) else str(body).encode()
@@ -149,11 +168,37 @@ def child_main():
         head = {"status": status}
     except BaseException as e:  # noqa: BLE001
         head = {"error": e.name if isinstance(e, RenderFailed) else type(e).__name__}
+        html = b""
     out.write(json.dumps(head).encode() + b"\n" + html)
     out.flush()
 
 
 CHILD = [sys.executable, os.path.abspath(__file__), "--render"]
+
+
+def descendants(pid):
+    """Every process started under `pid`, in whatever session or process group it now runs."""
+    parent_of = {}
+    if os.path.isdir("/proc/self"):
+        for entry in os.listdir("/proc"):
+            if entry.isdigit():
+                try:
+                    with open("/proc/%s/stat" % entry) as f:
+                        # "pid (name) state ppid ...": the name may hold spaces and brackets.
+                        parent_of[int(entry)] = int(f.read().rsplit(")", 1)[1].split()[1])
+                except (OSError, ValueError, IndexError):
+                    pass
+    else:  # the development machine (macOS has no /proc)
+        table = subprocess.run(["ps", "-Ao", "pid=,ppid="], stdout=subprocess.PIPE, check=False).stdout.decode()
+        for line in table.splitlines():
+            fields = line.split()
+            if len(fields) == 2 and fields[0].isdigit() and fields[1].isdigit():
+                parent_of[int(fields[0])] = int(fields[1])
+    found, frontier = [], [pid]
+    while frontier:
+        frontier = [child for child, parent in parent_of.items() if parent in frontier and child not in found]
+        found += frontier
+    return found
 
 
 def render_in_child(request, command=CHILD, stderr=None):
@@ -165,7 +210,13 @@ def render_in_child(request, command=CHILD, stderr=None):
     except subprocess.TimeoutExpired:
         raise RenderTimeout() from None
     finally:
-        # The child leads its own process group (start_new_session), so what it started goes with it.
+        # Whatever the child started goes with it, so the next render never runs beside a leftover
+        # browser: the driver starts the browser in a session of its own, out of reach of the group kill.
+        for pid in descendants(child.pid):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
         try:
             os.killpg(child.pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
