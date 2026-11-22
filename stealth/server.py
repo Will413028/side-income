@@ -19,7 +19,9 @@
 #
 # One page at a time, each in its own child process with its own browser: StealthyFetcher's call blocks
 # with only per-operation timeouts, so the deadline over the whole render is kept by killing the child's
-# process group, browser included. Nothing carries over between renders. Only the standard library is
+# process group: the child and the browser's driver die there, and the browser, which the driver starts in
+# a group of its own, exits when its driver is gone (CI's image job checks that none is left after a
+# render that ran out of time). Nothing carries over between renders. Only the standard library is
 # imported here; Scrapling is imported in the child, so the tests need neither it nor a browser.
 import json
 import os
@@ -119,6 +121,7 @@ def fetch_page(fetcher, url, wait_for, deadline):
         network_idle=True,
         timeout=budget(),
         solve_cloudflare=False,
+        retries=1,  # one attempt (Scrapling's default is 3): the daily run decides what is read again, within the source's request cap
         page_setup=page_setup,
         page_action=page_action,
     )
@@ -162,8 +165,7 @@ def render_in_child(request, command=CHILD, stderr=None):
     except subprocess.TimeoutExpired:
         raise RenderTimeout() from None
     finally:
-        # The child leads its own process group (start_new_session), so the browser it started goes with
-        # it and the next render never runs beside a leftover one.
+        # The child leads its own process group (start_new_session), so what it started goes with it.
         try:
             os.killpg(child.pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):

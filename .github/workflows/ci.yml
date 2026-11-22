@@ -123,25 +123,34 @@ jobs:
       - name: Stealth tier renders a page
         run: |
           docker rm --force browser
+          # The pages by address, not by container name (a first run by name ended in ERR_CONNECTION_REFUSED).
+          docker run -d --name hang --network smoke alpine:3.22 nc -lk -p 80
+          ip() { docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$1"; }
+          page=$(ip page); hang=$(ip hang); echo "page $page, hang $hang"
+          render() { curl -sS -m 90 -X POST http://127.0.0.1:3101/render -d "{\"url\":\"http://$1\",\"timeoutMs\":$2${3:+,\"waitFor\":\"$3\"}}" "${@:4}"; }
           test "$(docker run --rm side-income-web:ci-stealth id -u)" != 0
           docker run -d --name stealth --network smoke -p 127.0.0.1:3101:3100 --cap-drop ALL --security-opt no-new-privileges:true --shm-size 512m --memory 1g --init side-income-web:ci-stealth
           for i in $(seq 30); do curl -fsS http://127.0.0.1:3101/healthz && break; sleep 1; done
           # The compose healthcheck's command, in the image it runs in.
           docker exec stealth /app/.venv/bin/python -c "import sys, urllib.request as u; sys.exit(0 if u.urlopen('http://127.0.0.1:3100/healthz', timeout=3).status == 200 else 1)"
-          out=$(curl -sS -D headers.txt -X POST http://127.0.0.1:3101/render -d '{"url":"http://page/","timeoutMs":60000,"waitFor":"h1"}')
+          out=$(render "$page/" 60000 h1 -D headers.txt)
           cat headers.txt
           grep -qi '^x-upstream-status: 200' headers.txt
           grep -q 'Welcome to nginx' <<<"$out"
-          missing=$(curl -sS -D - -o /dev/null -X POST http://127.0.0.1:3101/render -d '{"url":"http://page/missing","timeoutMs":60000}')
+          missing=$(render "$page/missing" 60000 "" -D - -o /dev/null)
           grep -qi '^x-upstream-status: 404' <<<"$missing"
           # A selector that never appears is 422 (layout changed) within the budget, and the next render still works.
-          code=$(curl -sS -o /dev/null -w '%{http_code}' -m 40 -X POST http://127.0.0.1:3101/render -d '{"url":"http://page/","timeoutMs":15000,"waitFor":".never"}')
+          code=$(render "$page/" 15000 .never -o /dev/null -w '%{http_code}')
           echo "missing selector: $code"; test "$code" = 422
-          # A render that cannot finish in its time is 504 and leaves no browser behind for the next one.
-          code=$(curl -sS -o /dev/null -w '%{http_code}' -m 20 -X POST http://127.0.0.1:3101/render -d '{"url":"http://page/","timeoutMs":300}')
-          echo "past the deadline: $code"; test "$code" = 504
-          docker top stealth; test "$(docker top stealth | grep -ci chrom)" = 0
-          curl -fsS -o /dev/null -D - -X POST http://127.0.0.1:3101/render -d '{"url":"http://page/","timeoutMs":60000}' | grep -qi '^x-upstream-status: 200'
+          # A page that never answers (a listener that accepts and says nothing): 504 whether the navigation
+          # gives up first (8 s) or the deadline kills the render with its browser open (3 s), and no browser
+          # is left behind either way.
+          for ms in 8000 3000; do
+            code=$(render "$hang/" "$ms" "" -o /dev/null -w '%{http_code}')
+            echo "no answer within $ms ms: $code"; test "$code" = 504
+            sleep 3; docker top stealth; test "$(docker top stealth | grep -ci chrom)" = 0
+          done
+          render "$page/" 60000 "" -o /dev/null -D - | grep -qi '^x-upstream-status: 200'
       - if: failure()
         run: docker logs stealth || true
 

@@ -115,7 +115,7 @@ class Contract(unittest.TestCase):
             running[0] += 1
             peak[0] = max(peak[0], running[0])
             seen.append(request["url"].rsplit("/", 1)[1])
-            time.sleep(0.3)
+            time.sleep(1)
             running[0] -= 1
             return 200, b""
 
@@ -126,7 +126,8 @@ class Contract(unittest.TestCase):
 
             threads = [threading.Thread(target=call, args=("slow", 5000))]
             threads[0].start()
-            time.sleep(0.1)
+            while not seen:  # "slow" holds the turn before the others arrive
+                time.sleep(0.01)
             threads += [threading.Thread(target=call, args=("late", 50)), threading.Thread(target=call, args=("next", 5000))]
             for t in threads[1:]:
                 t.start()
@@ -207,8 +208,9 @@ class FetchPage(unittest.TestCase):
         self.assertEqual(url, "https://example.com/c")
         self.assertIs(kwargs["solve_cloudflare"], False)
         # Exactly these: no proxy (no IP rotation), no cookies or user data (no login), no headers.
-        self.assertEqual(sorted(kwargs), ["headless", "network_idle", "page_action", "page_setup", "solve_cloudflare", "timeout"])
-        self.assertEqual((kwargs["headless"], kwargs["network_idle"]), (True, True))
+        self.assertEqual(sorted(kwargs), ["headless", "network_idle", "page_action", "page_setup", "retries", "solve_cloudflare", "timeout"])
+        # One attempt: a failed render is not read again behind the source's request cap.
+        self.assertEqual((kwargs["headless"], kwargs["network_idle"], kwargs["retries"]), (True, True, 1))
         self.assertTrue(0 < kwargs["timeout"] <= 30_000 - server.MARGIN_MS)
 
     def test_the_status_is_the_first_navigation_response_of_the_main_frame(self):
@@ -274,11 +276,13 @@ class Child(unittest.TestCase):
         read, write = os.pipe()
         started = time.time()
         with self.assertRaises(RenderTimeout):
-            server.render_in_child({**self.REQUEST, "deadline": later(400)}, child(code), stderr=write)
+            server.render_in_child({**self.REQUEST, "deadline": later(3000)}, child(code), stderr=write)
         os.close(write)
-        self.assertLess(time.time() - started, 5)
-        grandchild = int(os.read(read, 32).decode().strip())
+        self.assertLess(time.time() - started, 10)
+        pid = os.read(read, 32).decode().strip()
         os.close(read)
+        self.assertTrue(pid.isdigit(), "the child never started its grandchild before the deadline")
+        grandchild = int(pid)
         for _ in range(50):
             try:
                 os.kill(grandchild, 0)

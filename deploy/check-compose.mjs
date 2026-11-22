@@ -56,7 +56,7 @@ for (const tier of ["browser", "stealth"]) {
   // Started for the run and removed after it: a tier the unit starts but never removes would hold its
   // memory until the next run, and one it never starts fails every source of that tier.
   if (!new RegExp(`^ExecStartPre=-/usr/bin/docker compose .* up -d --wait ${tier}$`, "m").test(unit)) problems.push(`systemd: no ExecStartPre starts ${tier}`);
-  if (!new RegExp(`^ExecStopPost=/usr/bin/docker compose .* rm --stop --force( \\S+)* ${tier}( \\S+)*$`, "m").test(unit)) problems.push(`systemd: no ExecStopPost removes ${tier}`);
+  if (!new RegExp(`^ExecStopPost=-?/usr/bin/docker compose .* rm --stop --force ${tier}$`, "m").test(unit)) problems.push(`systemd: no ExecStopPost removes ${tier}`);
 }
 // Only daily reads mail (plan step 7): the Resend key goes nowhere else, migrations included.
 for (const [name, service] of Object.entries(compose.services ?? {})) {

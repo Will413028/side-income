@@ -20,7 +20,10 @@ ExecStartPre=-/usr/bin/docker compose --env-file /etc/side-income/compose.env -f
 # a leftover one (e.g. after a docker restart mid-run) is removed first, or the name would block every start.
 ExecStartPre=-/usr/bin/docker rm --force side-income-daily
 ExecStart=/usr/bin/docker compose --env-file /etc/side-income/compose.env -f deploy/compose.yaml run --rm --name side-income-daily daily
-ExecStopPost=/usr/bin/docker compose --env-file /etc/side-income/compose.env -f deploy/compose.yaml --profile jobs rm --stop --force browser stealth
+ExecStopPost=/usr/bin/docker compose --env-file /etc/side-income/compose.env -f deploy/compose.yaml --profile jobs rm --stop --force browser
+# Its own line with "-": a checkout rolled back to before the stealth tier has no such service, and that
+# must neither fail the unit nor leave the browser tier running.
+ExecStopPost=-/usr/bin/docker compose --env-file /etc/side-income/compose.env -f deploy/compose.yaml --profile jobs rm --stop --force stealth
 # A run that timed out or was stopped: its container goes too (design review 12e O4), so the 11:00 start never
 # overlaps it. "-": after a normal run --rm has already removed it.
 ExecStopPost=-/usr/bin/docker rm --force side-income-daily
