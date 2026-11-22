@@ -1,5 +1,5 @@
 import type { CATEGORIES, FEEDBACK_STATES } from "@/db/pg/schema";
-import type { Facts } from "./facts";
+import type { JobFacts } from "./facts";
 
 // The settings- and time-dependent half of the evaluation (step-3-design.md core choice 1), over the
 // stored facts only: whether a listing is excluded now, its recommendation score in tenths, whether it
@@ -10,8 +10,11 @@ import type { Facts } from "./facts";
 export type Settings = { maxWeeklyHours: number | null; minFixedTwd: number; categories: readonly (typeof CATEGORIES)[number][] };
 export type FeedbackState = (typeof FEEDBACK_STATES)[number];
 
-/** What ranking reads of one content (a listing row or a listing version). */
-export type RankFacts = Pick<Facts, "category" | "categoryScore" | "hardExcluded" | "confirmedBase" | "fixedTwdMax" | "publishedAt" | "deadlineAt">
+/**
+ * What ranking reads of one content (a listing row or a listing version), typed as a job's: only the job
+ * rules read the job-only facts, and a job row always has them (factsOf; the per-type rule of step 5c-2).
+ */
+export type RankFacts = Pick<JobFacts, "category" | "categoryScore" | "hardExcluded" | "confirmedBase" | "fixedTwdMax" | "publishedAt" | "deadlineAt">
   & { fingerprint: string; weeklyHours: number | null };
 
 /** `goneAt`: when a complete read of the source no longer showed the listing (listings.gone_at); null while it is shown. */

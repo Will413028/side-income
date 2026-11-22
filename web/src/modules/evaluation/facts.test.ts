@@ -75,6 +75,6 @@ describe("FACTS_VERSION (plan D26)", () => {
     ];
     const digest = createHash("sha256").update(JSON.stringify(cases.map((c) => contest.facts(c)))).digest("hex");
     // On a deliberate rule change: bump FACTS_VERSION.contest in facts.ts and put the new digest here, in the same commit.
-    expect({ version: FACTS_VERSION.contest, digest }).toEqual({ version: 1, digest: "f3af394044d656ba894cac0c22a4aac8b6e0a9a372164bb216224585989501e7" });
+    expect({ version: FACTS_VERSION.contest, digest }).toEqual({ version: 2, digest: "8de93314baa4a955732d0a5cd3a9f7705320e57931a801cc41280b2730cd0661" });
   });
 });
