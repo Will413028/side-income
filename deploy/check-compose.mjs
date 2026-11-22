@@ -34,6 +34,9 @@ const networksOf = (service) => {
 };
 const browser = compose.services?.browser;
 if (browser) {
+  // D16 (opportunity types plan): bhuntr reads the times a page renders as UTC.
+  const tz = Array.isArray(browser.environment) ? browser.environment.find((e) => String(e).startsWith("TZ="))?.slice(3) : browser.environment?.TZ;
+  if (tz !== "UTC") problems.push(`browser: TZ must be UTC (is ${tz ?? "unset"})`);
   if ((browser.ports ?? []).length) problems.push("browser: publishes a port");
   if (browser.network_mode) problems.push(`browser: network_mode ${browser.network_mode}`);
   for (const [name, service] of Object.entries(compose.services)) {
