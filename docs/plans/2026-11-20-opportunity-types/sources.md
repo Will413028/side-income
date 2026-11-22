@@ -177,6 +177,8 @@ Command: `curl -sL https://www.drivendata.org/competitions/` (304 KB HTML, no em
 | robots.txt | allows `*` | disallows `/accounts/`, `/competitions/search/`, leaderboard partials |
 | terms | unknown | `/terms/` returns 404 |
 
+Re-measured 2026-11-22 for step 6b, plain tier, without following redirects (`curl -s`, no `-L`; the list page and the detail pages answer 200 directly). The list holds 75 cards (it grew from 53): each card is a `div.panel-container` with `data-status_active` / `data-status_completed`, `data-reward_prize` / `data-reward_practice` and `data-deadline` (`-1YYYYMMDD` on an active card, `-11YYYYMMDD` on a completed one); the title link is in `h3.panel-competition-title`; the host is the logo's `alt="Hosted by …"`; the prize is `.prize strong` (`$`, `€` or `£` with thousands commas). Active: 9 cards, 3 with prizes (one a `/benchmarks/` link, one hosted on another site), 6 practice. The competition's own page states `Competition End Date Dec. 3, 2026, 10 p.m. UTC` (Django's date format, in UTC), so the deadline is readable at plain tier; the 停止條件 did not trigger.
+
 ### CrunchDAO
 
 Command: `curl -sL https://api.hub.crunchdao.com/v2/competitions` (JSON: `content`, `pageNumber`, `pageSize` 20, `totalElements` 25, `totalPages` 2).
@@ -194,6 +196,9 @@ Command: `curl -sL https://api.hub.crunchdao.com/v2/competitions` (JSON: `conten
 | pagination | present | 2 pages of 20 |
 | robots.txt | allows `/` | disallows login, account, dashboard and admin paths (`hub.crunchdao.com`) |
 | terms | unknown | `www.crunchdao.com/terms` returns 404 |
+
+
+Re-measured 2026-11-22 for step 6b without following redirects (`curl -s`): both pages answer 200 directly, 25 competitions, 2 `OPEN` and `PUBLIC` (both `continuous`, `end` null). The list's `url` is the hub's front page (`https://hub.crunchdao.com/`) on 17 of 20, not the competition; `https://hub.crunchdao.com/competitions/<name>` answers 200 directly, so the connector derives the URL from `name`. No API documentation stating the zone of `end` was found, so `end` stays `no_timezone`.
 
 ## Added 2026-11-22: candidates never given a disposition, and new candidates (D14)
 
