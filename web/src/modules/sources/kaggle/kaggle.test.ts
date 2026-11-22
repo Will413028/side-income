@@ -45,6 +45,11 @@ describe("kaggle list", () => {
     ]);
   });
 
+  it("fails the run when no card shows a known state (the card wording changed)", async () => {
+    const list = fixture("list.html").replaceAll("to go", "remaining").replace("Ongoing", "Always");
+    await expect(scan(serving({ ...site(), [LIST_URL]: list }))).rejects.toThrow(/no card shows/);
+  });
+
   it("refuses a page with no competition card", () => {
     expect(() => parseList("<html><body>maintenance</body></html>")).toThrow(/no competition cards/);
   });
@@ -103,7 +108,7 @@ describe("kaggle pages", () => {
     const noClose = fixture("detail.html").replace("<span>Close</span>", "<span>Ends</span>");
     expect((await scan(serving({ ...site(), [detailUrl("example-bowl")]: noClose }))).listings.map((l) => l.external_id)).toEqual(["example-agent", "example-bowl"]);
     const closed = await scan(serving({ ...site(), [detailUrl("example-bowl")]: LATE }));
-    expect([closed.listings.map((l) => l.external_id), closed.rejected]).toEqual([["example-agent"], 0]);
+    expect([closed.listings.map((l) => l.external_id), closed.rejected, closed.examined]).toEqual([["example-agent"], 0, 1]);
     const bare = await scan(serving({ ...site(), [detailUrl("example-bowl")]: "<h1>Example Bowl</h1><span>Close</span><span>2 months to go</span>" }));
     expect([bare.listings.map((l) => l.external_id), bare.rejected, bare.examined]).toEqual([["example-agent"], 1, 2]);
   });

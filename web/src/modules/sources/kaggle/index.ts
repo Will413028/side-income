@@ -128,7 +128,10 @@ export function normalize(card: Card, detail: Detail): ContestInput {
 export async function scan(fetcher: Fetcher): Promise<{ seen: number; listings: ContestInput[]; truncated: boolean; rejected: number; examined: number }> {
   // Only the cards that say `… to go` are open: the list rows' `… ago` is when they closed (measured: a row
   // `20 days ago` whose page says `Close Nov 2, 2026`, 20 days before), and `Ongoing` has no deadline.
-  const open = parseList(pageHtml("kaggle", (await fetcher.get(renderRequest(LIST_URL, LIST_WAIT))).body)).filter((c) => c.state === "to_go");
+  const cards = parseList(pageHtml("kaggle", (await fetcher.get(renderRequest(LIST_URL, LIST_WAIT))).body));
+  // No card in either known state means the card wording changed: fail rather than read nothing.
+  if (!cards.some((c) => c.state !== "unknown")) throw new SourceError("kaggle: no card shows `… to go` or `Ongoing`");
+  const open = cards.filter((c) => c.state === "to_go");
   // Cards past the cap are left out rather than written without their page's deadline (which would
   // overwrite a stored one); the read is then truncated.
   const read = open.slice(0, MAX_DETAILS);
@@ -142,7 +145,10 @@ export async function scan(fetcher: Fetcher): Promise<{ seen: number; listings: 
       if (detail.deadline) deadlines++;
       // A page that shows itself closed is left out; one without a readable deadline is set aside, so a
       // deadline stored by an earlier read is kept.
-      if (detail.open === false) continue;
+      if (detail.open === false) {
+        examined--;
+        continue;
+      }
       if (!detail.deadline) throw new SourceError("kaggle: no final submission deadline");
       listings.push(normalize(c, detail));
     } catch (e) {
