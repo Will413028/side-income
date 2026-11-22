@@ -8,8 +8,8 @@ import { AccessChallenge, pageHtml, renderRequest } from "../shared/job-pages";
 import { SourceError, type Collected, type PageSourceSettings } from "../types";
 
 // Kaggle: the browser tier gets a reCAPTCHA check page on some reads, the stealth tier does not (plan D15;
-// measured on the VM 2026-11-22). The list page renders each competition as one link `/competitions/<slug>`
-// holding an icon (`trophy`, or `rocket_launch` for a hackathon), the title, a prize (`$100,000`, `3 Swag`,
+// measured on the VM 2026-11-22). The list page renders each competition as a link `/competitions/<slug>`
+// holding an icon (`trophy`, or `rocket_launch` for a hackathon) and the title; beside the link, in the same card, a prize (`$100,000`, `3 Swag`,
 // `Kudos`) and a state: the grid cards say `N … to go` or `Ongoing` (Knowledge competitions, no deadline,
 // not read), the list rows say only when they started (`20 days ago`). The deadline is on each competition's
 // page: its timeline gives `<Month D, YYYY> - Final Submission Deadline` (or the label first) and the note
@@ -45,6 +45,16 @@ function leaves($: ReturnType<typeof load>, root: Parameters<ReturnType<typeof l
   return $(root).find("*").toArray().filter((e) => $(e).children().length === 0 && !["script", "style"].includes(e.tagName)).map((e) => $(e).text().replace(/\s+/g, " ").trim()).filter(Boolean);
 }
 
+function stateOf(texts: string[]): "to_go" | "ongoing" | null {
+  return texts.some((t) => TO_GO.test(t)) ? "to_go" : texts.includes("Ongoing") ? "ongoing" : null;
+}
+
+/** The first path segment after `/competitions/` of any link to a Kaggle competition page (any depth, any slug shape). */
+function competitionOf(href: string | undefined): string | null {
+  const u = href && URL.canParse(href.trim(), ORIGIN) ? new URL(href.trim(), ORIGIN) : null;
+  return u && /(^|\.)kaggle\.com$/.test(u.hostname) ? (/^\/competitions\/([^/]+)/.exec(u.pathname)?.[1] ?? null) : null;
+}
+
 /** The competition cards on the rendered list page, each once (the first shown); refuses a page with none. */
 export function parseList(html: string): Card[] {
   const $ = load(html, { scriptingEnabled: false });
@@ -54,12 +64,12 @@ export function parseList(html: string): Card[] {
     const slug = idOf(a.attr("href"));
     if (!slug || cards.has(slug)) continue;
     // The grid card's prize and state sit beside its link, not in it (measured on the VM 2026-11-22: the
-    // link holds the icon, title, summary and team count): the card is the largest ancestor that links
-    // to this competition only.
+    // link holds the icon, title, summary and team count): climb from the link until the container shows a
+    // state, and never into one that links to another competition (any `/competitions/…` path counts).
     let card = a;
-    for (let i = 0; i < 8; i++) {
+    while (!stateOf(leaves($, card.get(0)!)) && !card.is("body")) {
       const up = card.parent();
-      if (!up.length || up.is("body") || new Set(up.find("a[href]").toArray().map((x) => idOf($(x).attr("href"))).filter(Boolean)).size > 1) break;
+      if (!up.length || up.is("body") || new Set(up.find("a[href]").toArray().map((x) => competitionOf($(x).attr("href"))).filter(Boolean)).size > 1) break;
       card = up;
     }
     const titleEl = a.find("div").filter((_, d) => $(d).children().length === 0 && $(d).text().trim() !== "").first();
@@ -70,7 +80,7 @@ export function parseList(html: string): Card[] {
       slug, title: titleEl.text().trim() || (a.attr("aria-label") ?? "").trim(),
       hackathon: a.find(".google-symbols").first().text().trim() === "rocket_launch",
       prize: (row ? row.split(" · ")[0].trim() : heading) || null,
-      state: texts.some((t) => TO_GO.test(t)) ? "to_go" : texts.includes("Ongoing") ? "ongoing" : "unknown",
+      state: stateOf(texts) ?? "unknown",
     });
   }
   if (!cards.size) throw new SourceError("kaggle: no competition cards");
