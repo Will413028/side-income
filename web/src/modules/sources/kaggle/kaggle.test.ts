@@ -122,6 +122,7 @@ describe("kaggle pages", () => {
   });
 
   it("reads the close field past a `Close` button elsewhere on the page", () => {
+    expect(parseDetail(`<button>Close</button><p>Dialog text</p>${fixture("detail.html")}`).open).toBe(true);
     expect(parseDetail(`<button>Close</button><p>Dialog text</p>${LATE}`).open).toBe(false);
   });
 
