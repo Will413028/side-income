@@ -12,7 +12,7 @@
     "boundaries": "depcruise src scripts --config .dependency-cruiser.cjs",
     "db:generate": "drizzle-kit generate --config drizzle.pg.config.ts",
     "db:check": "drizzle-kit check --config drizzle.pg.config.ts && drizzle-kit generate --config drizzle.pg.config.ts && test -z \"$(git status --porcelain -- drizzle-pg)\"",
-    "check": "pnpm typecheck && pnpm boundaries && pnpm db:check && pnpm test && node ../deploy/check-compose.mjs && node ../deploy/check-migrations.mjs && node --test ../deploy/test-deploy.mjs && node --test ../browser/server.test.mjs && node --test ../.githooks/pre-push.test.mjs"
+    "check": "pnpm typecheck && pnpm boundaries && pnpm db:check && pnpm test && node ../deploy/check-compose.mjs && node ../deploy/check-migrations.mjs && node --test ../deploy/test-deploy.mjs && node --test ../browser/server.test.mjs && python3 -m unittest discover -s ../stealth && node --test ../.githooks/pre-push.test.mjs"
   },
   "dependencies": {
     "cheerio": "1.2.0",

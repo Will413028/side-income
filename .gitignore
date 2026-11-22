@@ -8,3 +8,4 @@ runtime/
 AGENTS.local.md
 CLAUDE.local.md
 .cloudflare/
+__pycache__/
