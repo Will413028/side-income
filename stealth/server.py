@@ -194,12 +194,10 @@ def create_server(render=render_in_child, host="0.0.0.0", port=PORT):
     turn = threading.Lock()
 
     def one(request):
-        """Renders one after another; a request whose deadline passed while it waited is not rendered."""
+        """Renders one after another; a request still waiting at its deadline is not rendered."""
         if not turn.acquire(timeout=max(0, (request["deadline"] - now_ms()) / 1000)):
             raise RenderTimeout()
         try:
-            if now_ms() >= request["deadline"]:
-                raise RenderTimeout()
             return render(request)
         finally:
             turn.release()
