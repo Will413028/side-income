@@ -78,8 +78,17 @@ describe("bhuntr pages", () => {
     await expect(scan(serving(site(undefined, "<html><body>changed</body></html>")))).rejects.toThrow(/no detail page shows its period/);
   });
 
+  it("reads one period per category after each category's name, takes the latest end, and stops at the next period label", () => {
+    expect(periodEnd("徵件期間 學生組 2026-08-31 16:00 至 2026-11-30 10:00 社會組 2026-08-31 16:00 至 2026-12-15 15:59 評選期間 2027-01-01 00:00 至 2027-02-01 00:00")).toBe("2026-12-15T15:59:00.000Z");
+    expect(periodEnd("徵件期間 2026-06-11 16:00 至 2026-09-28 15:59 評選期間 2026-11-20 04:00 至 2026-12-20 04:00")).toBe("2026-09-28T15:59:00.000Z");
+  });
+
+  it("skips the label where it appears in prose before the field", () => {
+    expect(periodEnd("請於徵件期間內上傳作品。 徵件期間 2026-10-22 02:00 至 2026-11-30 15:59")).toBe("2026-11-30T15:59:00.000Z");
+  });
+
   it("reads a period whose date and time sit in separate elements", () => {
-    expect(periodEnd("徵件期間2026-10-2202:00至2026-11-3015:59")).toBe("2026-11-30T15:59:00.000Z");
+    expect(periodEnd("徵件期間2026-10-2202:00至2026-11-3015:59評選期間2027-01-0100:00至2027-02-0100:00")).toBe("2026-11-30T15:59:00.000Z");
   });
 
   it("fails the run when no card shows a timeline badge", async () => {
@@ -88,7 +97,7 @@ describe("bhuntr pages", () => {
 
   it("reads an absolute link with a query as the same id", () => {
     expect(idOf("https://bhuntr.com/tw/competitions/aaaaaaaaaaaaaaaaa1?utm_source=list")).toBe("aaaaaaaaaaaaaaaaa1");
-    expect([idOf("https://example.com/tw/competitions/aaaaaaaaaaaaaaaaa1"), idOf("/tw/competitions/aaaa.aaaaaaaa")]).toEqual([null, null]);
+    expect([idOf("https://example.com/tw/competitions/aaaaaaaaaaaaaaaaa1"), idOf("/tw/competitions/aaaa.aaaaaaaa"), idOf("/tw/competitions/AIGCPrize2026")]).toEqual([null, null, "AIGCPrize2026"]);
   });
 
   it("renders at most MAX_DETAILS pages and marks the read truncated beyond them", async () => {

@@ -31,10 +31,10 @@ export const MAX_DETAILS = 30;
 
 export type Card = { id: string; title: string; prize: string | null; open: boolean; badge: boolean };
 
-/** `/tw/competitions/<id>` (lowercase alphanumeric, 18 characters measured) on bhuntr.com, read with the URL parser (query and fragment dropped); null otherwise. */
+/** `/tw/competitions/<id>` (18 lowercase alphanumerics on most; a mixed-case slug on one, measured 2026-11-22) on bhuntr.com, read with the URL parser (query and fragment dropped); null otherwise. */
 export function idOf(href: string | undefined): string | null {
   const u = href && URL.canParse(href.trim(), ORIGIN) ? new URL(href.trim(), ORIGIN) : null;
-  const m = u && u.origin === ORIGIN ? /^\/tw\/competitions\/([a-z0-9]{8,40})\/?$/.exec(u.pathname) : null;
+  const m = u && u.origin === ORIGIN ? /^\/tw\/competitions\/([A-Za-z0-9][A-Za-z0-9-]{3,79})\/?$/.exec(u.pathname) : null;
   return m ? m[1] : null;
 }
 
@@ -66,13 +66,30 @@ export function prizeOf(text: string | null): Pick<ContestInput, "prize_text" | 
   return m && Number.isSafeInteger(amount) ? { prize_text: text, budget_max: amount, currency: m[2] } : { prize_text: text, budget_max: null, currency: null };
 }
 
-/** The end of `徵件期間 YYYY-MM-DD HH:MM 至 YYYY-MM-DD HH:MM`, read as UTC (D16); null when absent or not a real time. */
+const PAIR = /\d{4}-\d{2}-\d{2}\s*\d{2}:\d{2}\s*至\s*(\d{4})-(\d{2})-(\d{2})\s*(\d{2}):(\d{2})/g;
+
+/**
+ * The end of the submission period, read as UTC (D16). The block is `徵件期間` followed by one
+ * `YYYY-MM-DD HH:MM 至 YYYY-MM-DD HH:MM`, or by one per category, each after its category's name (measured
+ * 2026-11-22); it ends at the next period label (`評選期間` and the like); the label in prose before the field is skipped. With several categories the
+ * latest end is the competition's: entries are taken until then. Null when no pair is readable.
+ */
 export function periodEnd(pageText: string): string | null {
-  const m = /徵件期間\s*\d{4}-\d{2}-\d{2}\s*\d{2}:\d{2}\s*至\s*(\d{4})-(\d{2})-(\d{2})\s*(\d{2}):(\d{2})/.exec(pageText);
-  if (!m) return null;
-  const [y, mo, d, h, mi] = m.slice(1).map(Number);
-  const t = new Date(Date.UTC(y, mo - 1, d, h, mi));
-  return h < 24 && mi < 60 && t.getUTCMonth() === mo - 1 && t.getUTCDate() === d ? t.toISOString() : null;
+  // The label can also appear in prose ("徵件期間內…"): the first occurrence whose block holds a pair is the field.
+  for (let start = pageText.indexOf("徵件期間"); start >= 0; start = pageText.indexOf("徵件期間", start + 4)) {
+    const rest = pageText.slice(start + 4, start + 4 + 600);
+    const next = /[\u4e00-\u9fff]{1,4}期間/.exec(rest);
+    let latest: string | null = null;
+    for (const m of (next ? rest.slice(0, next.index) : rest).matchAll(PAIR)) {
+      const [y, mo, d, h, mi] = m.slice(1).map(Number);
+      const t = new Date(Date.UTC(y, mo - 1, d, h, mi));
+      if (h > 23 || mi > 59 || t.getUTCMonth() !== mo - 1 || t.getUTCDate() !== d) continue;
+      const at = t.toISOString();
+      if (latest === null || at > latest) latest = at;
+    }
+    if (latest !== null) return latest;
+  }
+  return null;
 }
 
 /** The organiser's name from the page's JSON-LD Event; null when absent or unreadable. */
