@@ -64,6 +64,10 @@ describe("zindi connector over its fixture", () => {
 });
 
 describe("zindi pages", () => {
+  it("asks the API host itself: the old host answers a redirect the fetcher does not follow", () => {
+    expect(new URL(pageUrl(0)).host).toBe("api.zindi.world");
+  });
+
   it("reads the open competitions and stops at the first closed one", async () => {
     const f = serving(api([...ids("open", 3).map((id) => competition(id)), ...ids("closed", 60).map(closed)]));
     const got = await zindiConnector(f);

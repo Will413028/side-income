@@ -14,7 +14,8 @@ import { SourceError, type Collected, type PageSourceSettings } from "../types";
 // a page that is not JSON or has no list or counts refuses the run. The list gives no region, age or student
 // rule and no place: those stay unknown (null), an online competition is not assumed.
 
-export const ENDPOINT = "https://api.zindi.africa/v1/competitions";
+/** api.zindi.africa answers 308 to this host, and the fetcher follows no redirect (measured from the VM, 2026-11-22). */
+export const ENDPOINT = "https://api.zindi.world/v1/competitions";
 export const PER_PAGE = 50;
 export const pageUrl = (page: number) => `${ENDPOINT}?page=${page}&per_page=${PER_PAGE}`;
 /** 12 pages of 50 cover the 527 competitions listed on 2026-11-22; the open ones (10) fit the first. */
