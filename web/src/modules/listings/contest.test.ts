@@ -131,10 +131,9 @@ describe("job-only facts on a contest row (plan D10, step 5c-1)", () => {
     expect([typeof j?.category, typeof j?.categoryScore, typeof j?.confirmedBase]).toEqual(["string", "number", "number"]);
   });
 
-  it("re-evaluates a contest stored by the previous image (neutral job facts, version 1) to null", async () => {
+  it("re-evaluates a contest left at version 1 with null facts (what migration 0006 leaves) to the current version", async () => {
     await intakeListings(db, "devpost", [contest("a", { deadline: date("2026-12-15") })], "page", NOW, CONTESTS);
-    // What deploy D's image wrote: the job facts' neutral values under contest version 1.
-    await db.update(listings).set({ category: "其他", categoryScore: 0, confirmedBase: 0, evaluatedWith: 1 });
+    await db.update(listings).set({ evaluatedWith: 1 });
     expect(await reevaluateStale(db)).toEqual({ reevaluated: 1, unparsable: 0 });
     expect(await listingBy(db, "devpost", "a")).toMatchObject({ category: null, categoryScore: null, confirmedBase: null, evaluatedWith: FACTS_VERSION.contest });
   });

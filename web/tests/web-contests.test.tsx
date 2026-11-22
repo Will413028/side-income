@@ -79,8 +79,11 @@ describe("contest detail and feedback", () => {
 
   it("answers not found, page and feedback, for a listing of a type this image does not know (after a rollback)", async () => {
     const id = await key("late");
-    // As a newer image would have written it; the CHECK of this image's schema is lifted for the test only.
-    await db.execute(sql`alter table listings drop constraint listings_opportunity_type`);
+    // As a newer image would have written it; the CHECKs of this image's schema that a new type meets (its type, and its
+    // contest columns: step 5c-2) are lifted for the test only.
+    const defs = (await db.execute(sql`select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'listings_contest_columns'`)) as unknown as { rows: { def: string }[] };
+    const contestColumns = defs.rows[0].def;
+    await db.execute(sql`alter table listings drop constraint listings_opportunity_type, drop constraint listings_contest_columns`);
     try {
       await db.execute(sql`update listings set opportunity_type = 'bounty' where id = ${Number(id)}`);
       await expect(listingDetail(db, now, id)).rejects.toBeInstanceOf(NotFound);
@@ -89,6 +92,7 @@ describe("contest detail and feedback", () => {
     } finally {
       await db.execute(sql`truncate listings cascade`);
       await db.execute(sql`alter table listings add constraint listings_opportunity_type check (opportunity_type in ('job', 'contest'))`);
+      await db.execute(sql.raw(`alter table listings add constraint listings_contest_columns ${contestColumns}`));
     }
   });
 });

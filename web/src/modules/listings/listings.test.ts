@@ -179,9 +179,36 @@ describe("opportunity_type constraint (opportunity types plan step 3)", () => {
     await intakeListings(db, "tasker", [job("2")], "mail");
     await intakeListings(db, "tasker", [job("2", { title: "Changed" })], "mail");
     expect(await versionCount(db, (await listingBy(db, "tasker", "2"))!.id)).toBe(2);
-    await db.execute(sql`update listings set opportunity_type = 'contest'`);
-    await db.execute(sql`update listing_versions set opportunity_type = 'contest'`);
+    // A contest row carries no job facts (step 5c-2's rule).
+    await db.execute(sql`update listings set opportunity_type = 'contest', category = null, category_score = null, confirmed_base = null`);
+    await db.execute(sql`update listing_versions set opportunity_type = 'contest', category = null, category_score = null, confirmed_base = null`);
     await expect(db.execute(sql`update listings set opportunity_type = 'bounty'`)).rejects.toThrow(/opportunity_type/);
     await expect(db.execute(sql`update listing_versions set opportunity_type = 'bounty'`)).rejects.toThrow(/opportunity_type/);
+  });
+});
+
+describe("per-type column rules (opportunity types plan D10, step 5c-2)", () => {
+  it("requires the job facts on a job and refuses them on a contest, on both tables", async () => {
+    await intakeListings(db, "tasker", [job("2")], "mail");
+    await intakeListings(db, "tasker", [job("2", { title: "Changed" })], "mail");
+    for (const table of ["listings", "listing_versions"]) {
+      const t = sql.raw(table);
+      await expect(db.execute(sql`update ${t} set category = null`)).rejects.toMatchObject({ cause: { constraint: `${table}_job_facts` } });
+      await expect(db.execute(sql`update ${t} set category_score = null`)).rejects.toMatchObject({ cause: { constraint: `${table}_job_facts` } });
+      await expect(db.execute(sql`update ${t} set confirmed_base = null`)).rejects.toMatchObject({ cause: { constraint: `${table}_job_facts` } });
+      await expect(db.execute(sql`update ${t} set opportunity_type = 'contest'`)).rejects.toMatchObject({ cause: { constraint: `${table}_job_facts` } });
+      await expect(db.execute(sql`update ${t} set opportunity_type = 'contest', category = null, category_score = null`)).rejects.toMatchObject({ cause: { constraint: `${table}_job_facts` } });
+    }
+  });
+
+  it("refuses a contest column on a job, on both tables", async () => {
+    await intakeListings(db, "tasker", [job("2")], "mail");
+    await intakeListings(db, "tasker", [job("2", { title: "Changed" })], "mail");
+    for (const table of ["listings", "listing_versions"]) {
+      const t = sql.raw(table);
+      for (const set of ["registration_deadline = '2026-12-01'", "prize_text = '$1'", "online = true", "invite_only = false", "hackathon = false"]) {
+        await expect(db.execute(sql`update ${t} set ${sql.raw(set)}`)).rejects.toMatchObject({ cause: { constraint: `${table}_contest_columns` } });
+      }
+    }
   });
 });

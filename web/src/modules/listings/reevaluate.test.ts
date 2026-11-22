@@ -68,7 +68,7 @@ describe("reevaluateStale", () => {
   it("never touches rows of a type this image does not know (a rollback after a newer image wrote them)", async () => {
     await intakeListings(db, "linkedin", [job("m")], "mail", NOW);
     await intakeListings(db, "linkedin", [job("m", { description: "Build an LLM automation backend, remote" })], "mail", new Date(NOW.getTime() + 1000));
-    const unknown = { opportunityType: "contest", evaluatedWith: 0, raw: { opportunity_type: "contest", external_id: "m" } };
+    const unknown = { opportunityType: "contest", category: null, categoryScore: null, confirmedBase: null, evaluatedWith: 0, raw: { opportunity_type: "contest", external_id: "m" } };
     await db.update(listings).set(unknown);
     await db.update(listingVersions).set(unknown);
     // An image whose OPPORTUNITY_TYPES is ["job"]: the one before contests (contest.test.ts has the listing case).
