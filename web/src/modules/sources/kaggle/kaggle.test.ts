@@ -90,6 +90,19 @@ describe("kaggle detail", () => {
     expect(parseDetail(page)).toMatchObject({ open: true, deadline: { kind: "date", date: "2027-01-06" }, entry: null });
   });
 
+  it("reads a community host's `Final submission deadline:` line, with its UTC time when given", () => {
+    const page = (line: string) => `<h1>T</h1><span>Close</span><span>2 months to go</span><p>${line}</p>`;
+    expect([
+      parseDetail(page("Final submission deadline: January 20, 2027 at 10:00 UTC.")).deadline,
+      parseDetail(page("Start: November 10, 2026 Final submission deadline: February 17, 2027, 11:59 PM UTC Judging starts")).deadline,
+      parseDetail(page("Final submission deadline: March 3, 2027.")).deadline,
+      parseDetail(page("Final submission deadline: March 3, 2027 at 25:00 UTC.")).deadline,
+      parseDetail(page("Submission deadline: 23:59, November 20, 2026 (UTC+8)")).deadline,
+    ]).toEqual([
+      { kind: "instant", at: "2027-01-20T10:00:00.000Z" }, { kind: "instant", at: "2027-02-17T23:59:00.000Z" }, { kind: "date", date: "2027-03-03" }, null, null,
+    ]);
+  });
+
   it("reads a closed competition (an absolute close date) as not open, and a page without a close field as unknown", () => {
     expect(parseDetail(LATE).open).toBe(false);
     expect(parseDetail("<h1>T</h1><p>nothing</p>")).toEqual({ open: null, deadline: null, entry: null, title: "T", host: null });
@@ -100,6 +113,8 @@ describe("kaggle detail", () => {
 describe("kaggle pages", () => {
   it("waits for visible elements: the render service waits until its selector is visible, which a script never is", () => {
     for (const sel of [LIST_WAIT, DETAIL_WAIT]) expect(sel).not.toMatch(/^\s*(script|meta|link|head|style|template)\b/i);
+    // A community-hosted page has no timeline heading: the wait is for what every page shows.
+    expect(DETAIL_WAIT).toBe("h1");
   });
 
   it("renders the list, then only the cards that say `… to go` (a row's `… ago` is when it closed)", async () => {
@@ -119,8 +134,10 @@ describe("kaggle pages", () => {
     expect((await scan(serving({ ...site(), [detailUrl("example-bowl")]: noClose }))).listings.map((l) => l.external_id)).toEqual(["example-agent", "example-bowl"]);
     const closed = await scan(serving({ ...site(), [detailUrl("example-bowl")]: LATE }));
     expect([closed.listings.map((l) => l.external_id), closed.rejected, closed.examined]).toEqual([["example-agent"], 0, 1]);
-    const bare = await scan(serving({ ...site(), [detailUrl("example-bowl")]: "<h1>Example Bowl</h1><span>Close</span><span>2 months to go</span>" }));
-    expect([bare.listings.map((l) => l.external_id), bare.rejected, bare.examined]).toEqual([["example-agent"], 1, 2]);
+    const bare = await scan(serving({ ...site(), [detailUrl("example-bowl")]: "<h1>Example Bowl</h1><span>Close</span><span>2 months to go</span><p>The host's own words about the deadline.</p>" }));
+    expect([bare.listings.map((l) => [l.external_id, l.deadline]), bare.rejected]).toEqual([[["example-agent", { kind: "instant", at: "2026-12-02T23:59:00.000Z" }], ["example-bowl", null]], 0]);
+    const neither = await scan(serving({ ...site(), [detailUrl("example-bowl")]: "<h1>Example Bowl</h1><p>nothing readable</p>" }));
+    expect([neither.listings.map((l) => l.external_id), neither.rejected, neither.examined]).toEqual([["example-agent"], 1, 2]);
   });
 
   it("sets aside a page that does not render, and fails the run on the check page or a refusal", async () => {

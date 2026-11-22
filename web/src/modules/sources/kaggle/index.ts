@@ -23,8 +23,9 @@ import { SourceError, type Collected, type PageSourceSettings } from "../types";
 export const ORIGIN = "https://www.kaggle.com";
 export const LIST_URL = `${ORIGIN}/competitions`;
 export const LIST_WAIT = "a[href^='/competitions/']";
-/** Every competition page measured shows its timeline heading. */
-export const DETAIL_WAIT = "text=Timeline";
+/** Every competition page shows its title; community-hosted pages have no timeline heading (6 of 21 open
+ * on 2026-11-22: a wait for it answered 422 after the whole budget). */
+export const DETAIL_WAIT = "h1";
 /** Pages read per run (20 cards `… to go` on 2026-11-22); more is a truncated read. */
 export const MAX_DETAILS = 40;
 
@@ -111,6 +112,23 @@ function dateFor(text: string, label: string): string | null {
   return m[1] ? isoDate(m[1], m[2], m[3]) : isoDate(m[4], m[5], m[6]);
 }
 
+/**
+ * A community host's own line `Final submission deadline: <Month D, YYYY>`, with ` at HH:MM UTC` or
+ * `, HH:MM AM/PM UTC` after it read as that instant, without a time as a date (measured 2026-11-22 on two
+ * pages); any other wording is not read.
+ */
+function colonDeadline(text: string): ContestInput["deadline"] {
+  const m = new RegExp(`Final submission deadline:\\s*${DATE}(?:(?: at|,)\\s*(\\d{1,2}):(\\d{2})\\s*(AM|PM)?\\s*UTC)?`, "i").exec(text);
+  const date = m ? isoDate(m[1], m[2], m[3]) : null;
+  if (!m || !date) return null;
+  if (m[4] === undefined) return { kind: "date", date };
+  let h = Number(m[4]);
+  const min = Number(m[5]);
+  if (m[6]) h = (h % 12) + (m[6].toUpperCase() === "PM" ? 12 : 0);
+  if ((m[6] ? Number(m[4]) < 1 || Number(m[4]) > 12 : h > 23) || min > 59) return null;
+  return { kind: "instant", at: `${date}T${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}:00.000Z` };
+}
+
 export type Detail = { open: boolean | null; deadline: ContestInput["deadline"]; entry: string | null; title: string | null; host: string | null };
 
 export function parseDetail(html: string): Detail {
@@ -124,10 +142,11 @@ export function parseDetail(html: string): Detail {
   const open = value === undefined ? null : TO_GO.test(value);
   const final = dateFor(text, "Final Submission Deadline");
   const utc = /All deadlines are at 11:59 PM UTC/.test(text);
+  const colon = final ? null : colonDeadline(text);
   const entry = /Entry Deadline\s*-\s*Same as the Final Submission Deadline/.test(text) ? final : dateFor(text, "Entry Deadline");
   const title = $("h1").first().text().trim() || null;
   const host = /Competition Host\s*(.{1,200}?)\s*Prizes & Awards/.exec(text)?.[1].trim() ?? null;
-  return { open, deadline: final ? (utc ? { kind: "instant", at: `${final}T23:59:00.000Z` } : { kind: "date", date: final }) : null, entry, title, host };
+  return { open, deadline: final ? (utc ? { kind: "instant", at: `${final}T23:59:00.000Z` } : { kind: "date", date: final }) : colon, entry, title, host };
 }
 
 export function normalize(card: Card, detail: Detail): ContestInput {
@@ -162,13 +181,14 @@ export async function scan(fetcher: Fetcher): Promise<{ seen: number; listings: 
       const detail = parseDetail(pageHtml("kaggle", (await fetcher.get(renderRequest(`${ORIGIN}/competitions/${c.slug}`, DETAIL_WAIT))).body));
       rendered++;
       if (detail.deadline) deadlines++;
-      // A page that shows itself closed is left out; one without a readable deadline is set aside, so a
-      // deadline stored by an earlier read is kept.
+      // A page that shows itself closed is left out. An open page without a deadline in a form read here
+      // (community hosts write it in their own words) is stored with the deadline unknown; one whose open
+      // state is not readable either is set aside.
       if (detail.open === false) {
         examined--;
         continue;
       }
-      if (!detail.deadline) throw new SourceError("kaggle: no final submission deadline");
+      if (!detail.deadline && detail.open !== true) throw new SourceError("kaggle: no final submission deadline");
       listings.push(normalize(c, detail));
     } catch (e) {
       // One page that fails to render or read is set aside (counted; services/collect fails the run when
