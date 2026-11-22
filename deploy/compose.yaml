@@ -73,6 +73,10 @@ services:
   browser:
     image: ${APP_IMAGE:?set APP_IMAGE in the env file}-browser
     profiles: [jobs]
+    # Pages render times in the browser's zone; 獎金獵人's zone-free times are read as UTC (opportunity
+    # types plan D16), so the zone is fixed here and deploy/check-compose.mjs keeps it.
+    environment:
+      TZ: UTC
     networks: [browser]
     init: true
     shm_size: 512m # Chromium uses /dev/shm; the 64 MB default crashes tabs (Playwright docs)

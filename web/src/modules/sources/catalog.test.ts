@@ -18,7 +18,7 @@ describe("source catalog", () => {
   });
 
   it("reads every source plain except the ones a plain request cannot read (spikes.md §2, plan step 8)", () => {
-    expect(Object.fromEntries(SOURCES.filter((s) => s.maxTier !== "plain").map((s) => [s.name, s.maxTier]))).toEqual({ remoteco: "browser_like", idealist: "browser", braintrust: "browser" });
+    expect(Object.fromEntries(SOURCES.filter((s) => s.maxTier !== "plain").map((s) => [s.name, s.maxTier]))).toEqual({ remoteco: "browser_like", idealist: "browser", braintrust: "browser", bhuntr: "browser" });
   });
 
   it("finds a source by name and refuses an unknown one", () => {
@@ -31,7 +31,7 @@ describe("source catalog", () => {
   });
 
   it("gives every source one opportunity type: jobs, and the contest sources (opportunity types plan D1)", () => {
-    expect(SOURCES.filter((s) => s.opportunityType !== "job").map((s) => [s.name, s.opportunityType])).toEqual([["devpost", "contest"], ["mlcontests", "contest"], ["zindi", "contest"], ["drivendata", "contest"], ["crunchdao", "contest"]]);
+    expect(SOURCES.filter((s) => s.opportunityType !== "job").map((s) => [s.name, s.opportunityType])).toEqual([["devpost", "contest"], ["mlcontests", "contest"], ["zindi", "contest"], ["drivendata", "contest"], ["crunchdao", "contest"], ["bhuntr", "contest"]]);
   });
 
   it("gives every source a page label, and falls back to the name", () => {
@@ -49,7 +49,7 @@ describe("source catalog", () => {
       taiwanjobs: "台灣就業通", arbeitnow: "Arbeitnow", getonboard: "Get on Board", cryptojobslist: "CryptoJobsList",
       nodesk: "NoDesk", justremote: "JustRemote", dynamitejobs: "Dynamite Jobs", jobbank518: "518 熊班", chickpt: "小雞上工",
       arc: "Arc", web3career: "Web3.career", wellfound: "Wellfound", remotecom: "Remote.com Jobs", ycjobs: "YC Jobs",
-      remoteco: "Remote.co", idealist: "Idealist", braintrust: "Braintrust", devpost: "Devpost", mlcontests: "MLContests", zindi: "Zindi", drivendata: "DrivenData", crunchdao: "CrunchDAO",
+      remoteco: "Remote.co", idealist: "Idealist", braintrust: "Braintrust", devpost: "Devpost", mlcontests: "MLContests", zindi: "Zindi", drivendata: "DrivenData", crunchdao: "CrunchDAO", bhuntr: "獎金獵人",
     });
     expect(sourceLabel("hackernews")).toBe("Hacker News");
     expect(sourceLabel("constructor")).toBe("constructor");
