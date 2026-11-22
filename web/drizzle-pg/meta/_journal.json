@@ -50,6 +50,13 @@
       "when": 1795312523116,
       "tag": "0006_contest_rules",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795323978213,
+      "tag": "0007_stealth_tier",
+      "breakpoints": true
     }
   ]
 }

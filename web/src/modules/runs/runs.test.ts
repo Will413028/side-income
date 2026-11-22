@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import type { PgDb } from "@/db/pg/client";
+import { runSources } from "@/db/pg/schema";
 import { finishRun, openRun, recordSource, sourcesReadSince, taipeiDate } from "@/modules/runs/public";
+import { TIERS } from "@/platform/fetch";
 import { freshPg } from "../../../tests/helpers/pg";
 
 // Plan step 6: the run records.
@@ -32,6 +34,15 @@ describe("run records", () => {
     await recordSource(db, first.runId, row("b", "ok", at("2026-11-16T07:01:00Z")));
     await finishRun(db, first.runId, "succeeded", null, {}, at("2026-11-16T07:02:00Z"));
     expect(await openRun(db, "2026-11-16", at("2026-11-16T08:00:00Z"))).toEqual({ outcome: "done", runId: first.runId });
+  });
+
+  it("stores every reading tier, stealth included, and refuses any other (opportunity types plan step 6c-2)", async () => {
+    const r = await openRun(db, "2026-11-16", at("2026-11-16T06:00:00Z"));
+    for (const tier of TIERS) await recordSource(db, r.runId, { ...row(tier, "ok", at("2026-11-16T06:01:00Z")), tier });
+    const stored = await db.select({ source: runSources.source, tier: runSources.tier }).from(runSources);
+    expect(stored.map((x) => x.tier).sort()).toEqual([...TIERS].sort());
+    expect(stored.every((x) => x.source === x.tier)).toBe(true);
+    await expect(db.execute(sql`insert into run_sources (run_id, source, status, tier) values (${r.runId}, 'x', 'ok', 'proxy')`)).rejects.toThrow();
   });
 
   it("names the sources with an ok row since a time, among those asked", async () => {

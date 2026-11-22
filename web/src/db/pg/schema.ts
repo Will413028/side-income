@@ -245,12 +245,12 @@ export const runSources = pgTable("run_sources", {
   status: text("status", { enum: ["ok", "failed"] }).notNull(),
   reason: text("reason"),
   error: text("error"),
-  tier: text("tier", { enum: ["plain", "browser_like", "browser"] }).notNull().default("plain"),
+  tier: text("tier", { enum: ["plain", "browser_like", "browser", "stealth"] }).notNull().default("plain"),
   counts: jsonb("counts").notNull().default({}),
   startedAt: at("started_at").notNull().defaultNow(),
   finishedAt: at("finished_at"),
 }, (t) => [
   primaryKey({ columns: [t.runId, t.source] }),
   check("run_sources_status", sql`${t.status} in ('ok', 'failed')`),
-  check("run_sources_tier", sql`${t.tier} in ('plain', 'browser_like', 'browser')`),
+  check("run_sources_tier", sql`${t.tier} in ('plain', 'browser_like', 'browser', 'stealth')`),
 ]);
