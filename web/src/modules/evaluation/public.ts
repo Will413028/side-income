@@ -1,5 +1,5 @@
 export { evaluate, formatG, rankFactsOf, recommend, type Content, type Evaluation, type Recommendation, type Status } from "./evaluate";
-export { categorize, FACTS_VERSION, factsOf, type Category, type Facts } from "./facts";
+export { categorize, FACTS_VERSION, factsOf, type Category, type Facts, type JobFacts } from "./facts";
 export { DEFAULT_SETTINGS, PAGE_SIZE, rankedPage, readRankables, readSettings, VIEWS, type View } from "./list";
 export { byDeadline, contestFacts, type Contest } from "./contest";
 export { deadlineAt, type Deadline, type Kind, type Listing } from "./listing";

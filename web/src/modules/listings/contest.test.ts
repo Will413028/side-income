@@ -121,3 +121,26 @@ describe("rollback from the deploy that adds contests", () => {
     expect(await listingBy(db, "devpost", "a")).toMatchObject({ evaluatedWith: FACTS_VERSION.contest, hardExcluded: false });
   });
 });
+
+describe("job-only facts on a contest row (plan D10, step 5c-1)", () => {
+  it("stores them null on a contest and present on a job", async () => {
+    await intakeListings(db, "devpost", [contest("a")], "page", NOW, CONTESTS);
+    await intakeListings(db, "jobicy", [job("j")], "page", NOW);
+    expect(await listingBy(db, "devpost", "a")).toMatchObject({ category: null, categoryScore: null, confirmedBase: null });
+    const j = await listingBy(db, "jobicy", "j");
+    expect([typeof j?.category, typeof j?.categoryScore, typeof j?.confirmedBase]).toEqual(["string", "number", "number"]);
+  });
+
+  it("re-evaluates a contest stored by the previous image (neutral job facts, version 1) to null", async () => {
+    await intakeListings(db, "devpost", [contest("a", { deadline: date("2026-12-15") })], "page", NOW, CONTESTS);
+    // What deploy D's image wrote: the job facts' neutral values under contest version 1.
+    await db.update(listings).set({ category: "其他", categoryScore: 0, confirmedBase: 0, evaluatedWith: 1 });
+    expect(await reevaluateStale(db)).toEqual({ reevaluated: 1, unparsable: 0 });
+    expect(await listingBy(db, "devpost", "a")).toMatchObject({ category: null, categoryScore: null, confirmedBase: null, evaluatedWith: FACTS_VERSION.contest });
+  });
+
+  it("the contest list reads contests whose job-only facts are null", async () => {
+    await intakeListings(db, "devpost", [contest("a", { deadline: date("2026-12-15") })], "page", NOW, CONTESTS);
+    expect(await rankedPage(db, "contest", DEFAULT_SETTINGS, NOW, "candidates", 0)).toMatchObject({ total: 1 });
+  });
+});

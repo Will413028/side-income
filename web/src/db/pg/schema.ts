@@ -73,10 +73,14 @@ const content = () => ({
   inviteOnly: boolean("invite_only"),
   /** A hackathon is a contest with this flag, not a type of its own (plan D5). */
   hackathon: boolean("hackathon"),
-  category: text("category").notNull(),
-  categoryScore: smallint("category_score").notNull(),
+  /**
+   * Job-only facts (opportunity types plan D10): present on a job row, null on a contest row. Step 5c-1
+   * (deploy E1) makes them nullable and the contest evaluator stores null; step 5c-2 adds the per-type rule.
+   */
+  category: text("category"),
+  categoryScore: smallint("category_score"),
   hardExcluded: boolean("hard_excluded").notNull(),
-  confirmedBase: smallint("confirmed_base").notNull(),
+  confirmedBase: smallint("confirmed_base"),
   fixedTwdMax: doublePrecision("fixed_twd_max"),
   /** The FACTS_VERSION the evaluation columns were computed with (plan D26); 0: before versions existed. */
   evaluatedWith: smallint("evaluated_with").notNull().default(0),

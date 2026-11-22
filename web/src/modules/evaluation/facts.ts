@@ -16,7 +16,8 @@ const CATEGORIES: readonly (readonly [(typeof CATEGORY_NAMES)[number], number, r
   ["後端／API", 75, ["backend", "api", "後端", "后端", "串接"]],
 ];
 
-export type Facts = {
+/** The facts of a job: every field set. */
+export type JobFacts = {
   category: Category;
   categoryScore: number;
   /** A reason that excludes the listing whatever the settings and the time. */
@@ -28,6 +29,12 @@ export type Facts = {
   publishedAt: Date | null;
   deadlineAt: Date | null;
 };
+
+/**
+ * The stored facts of any type (opportunity types plan D10): the job-only facts are null on a row of
+ * another type, so nothing can rank a contest by them.
+ */
+export type Facts = Omit<JobFacts, "category" | "categoryScore" | "confirmedBase"> & { category: Category | null; categoryScore: number | null; confirmedBase: number | null };
 
 const isAscii = (s: string) => /^[\x00-\x7f]*$/.test(s);
 
@@ -56,9 +63,9 @@ export const fixedTwdMax = (l: Listing): number | null =>
  * so a rule change also adds a fixture case that it changes (or bumps the version by hand). One version per
  * opportunity type (opportunity types plan D1): a type's rule change re-evaluates only its own rows.
  */
-export const FACTS_VERSION: Readonly<Record<OpportunityType, number>> = Object.freeze({ job: 1, contest: 1 });
+export const FACTS_VERSION: Readonly<Record<OpportunityType, number>> = Object.freeze({ job: 1, contest: 2 });
 
-export function factsOf(l: Listing): Facts {
+export function factsOf(l: Listing): JobFacts {
   const { category, categoryScore } = categorize(l);
   const hardExcluded = l.listingClosed === true
     || l.compensationEvidence === "unpaid_or_equity_only"

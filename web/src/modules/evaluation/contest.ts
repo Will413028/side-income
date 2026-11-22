@@ -14,12 +14,12 @@ export type Contest = { listingClosed: boolean | null; publishedAt: Date | null;
 
 /**
  * The stored facts of a contest, under FACTS_VERSION.contest (facts.ts): bump it with any change to what
- * this returns. The job-only facts carry their neutral value: the columns are shared and
- * not null (schema.ts content()), and nothing ranks a contest by them.
+ * this returns. The job-only facts are null (plan D10; version 2, step 5c-1): nothing ranks a contest by
+ * them, and step 5c-2's rule requires null on a contest row.
  */
 export function contestFacts(c: Contest): Facts {
   return {
-    category: "其他", categoryScore: 0, confirmedBase: 0, fixedTwdMax: null,
+    category: null, categoryScore: null, confirmedBase: null, fixedTwdMax: null,
     hardExcluded: c.listingClosed === true, publishedAt: c.publishedAt, deadlineAt: deadlineAt(c.deadline),
   };
 }
