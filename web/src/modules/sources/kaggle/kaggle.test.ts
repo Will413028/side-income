@@ -54,6 +54,8 @@ describe("kaggle list", () => {
   it("never reads a card past a neighbour, whatever the neighbour's link looks like", () => {
     const list = fixture("list.html").replace('href="/competitions/example-bowl"', 'href="/competitions/example-bowl/overview"');
     expect(parseList(list).find((c) => c.slug === "example-agent")).toMatchObject({ prize: "$75,000", state: "to_go" });
+    const rows = fixture("list.html").replace('href="/competitions/example-late"', 'href="/competitions/example-late/overview"');
+    expect(parseList(rows).find((c) => c.slug === "example-older")).toMatchObject({ prize: "Swag" });
     const solo = '<section><h2>Research</h2><div><a href="/competitions/solo"><span class="google-symbols">trophy</span><div>Solo</div></a><div><h2>$50,000</h2><span>10 days to go</span></div></div></section>';
     expect(parseList(`<html><body>${solo}<p><a href="/competitions/other">Other</a></p></body></html>`)[0]).toMatchObject({ slug: "solo", prize: "$50,000", state: "to_go" });
   });
