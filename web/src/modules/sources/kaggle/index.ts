@@ -1,10 +1,10 @@
 import { load } from "cheerio";
 import { parseContestInput, type ContestInput } from "@/modules/listings/public";
-import type { Fetcher } from "@/platform/fetch";
+import { ZodError } from "zod";
+import { FetchError, type Fetcher } from "@/platform/fetch";
 import { codePoints } from "../shared/json";
 import { htmlText } from "../shared/html";
-import { pageHtml, renderRequest } from "../shared/job-pages";
-import { setAside } from "../shared/set-aside";
+import { AccessChallenge, pageHtml, renderRequest } from "../shared/job-pages";
 import { SourceError, type Collected, type PageSourceSettings } from "../types";
 
 // Kaggle: the browser tier gets a reCAPTCHA check page on some reads, the stealth tier does not (plan D15;
@@ -15,8 +15,9 @@ import { SourceError, type Collected, type PageSourceSettings } from "../types";
 // page: its timeline gives `<Month D, YYYY> - Final Submission Deadline` (or the label first) and the note
 // `All deadlines are at 11:59 PM UTC on the corresponding day`, so the deadline is 23:59 UTC that day (a date
 // without the note, D12); the entry deadline is the registration deadline. The page's `Close` field says
-// `N … to go` while it is open and a date once closed (a list row can be closed: measured with `Late
-// Submission`). These dates are text in the page, not times the browser renders, so the render's zone does
+// `N … to go` while it is open and a date once closed. Kaggle's check page has no competition link, so a
+// render waiting for one answers 422 first: a block then shows as `browser_tier` (http_422), and the check
+// page's title in shared/job-pages.ts is a backstop for a render that returns it. These dates are text in the page, not times the browser renders, so the render's zone does
 // not matter (D16 applies to the browser tier's zone-free times only).
 
 export const ORIGIN = "https://www.kaggle.com";
@@ -24,7 +25,7 @@ export const LIST_URL = `${ORIGIN}/competitions`;
 export const LIST_WAIT = "a[href^='/competitions/']";
 /** Every competition page measured shows its timeline heading. */
 export const DETAIL_WAIT = "text=Timeline";
-/** Pages read per run (29 not ongoing on 2026-11-22); more is a truncated read. */
+/** Pages read per run (20 cards `… to go` on 2026-11-22); more is a truncated read. */
 export const MAX_DETAILS = 40;
 
 export type Card = { slug: string; title: string; hackathon: boolean; prize: string | null; state: "to_go" | "ongoing" | "unknown" };
@@ -97,9 +98,11 @@ export function parseDetail(html: string): Detail {
   const text = htmlText(html);
   const $ = load(html, { scriptingEnabled: false });
   const texts = leaves($, "body");
-  const at = texts.indexOf("Close");
-  const close = at >= 0 ? (texts[at + 1] ?? null) : null;
-  const open = close === null ? null : TO_GO.test(close) ? true : new RegExp(`^(?:${MONTHS.map((m) => m.slice(0, 3)).join("|")}) \\d{1,2}, \\d{4}$`).test(close) ? false : null;
+  // The first `Close` leaf followed by `… to go` (open) or a date (closed); any other `Close` (a dialog's
+  // button) is passed over.
+  const closed = new RegExp(`^(?:${MONTHS.map((m) => m.slice(0, 3)).join("|")}) \\d{1,2}, \\d{4}$`);
+  const value = texts.find((t, i) => i > 0 && texts[i - 1] === "Close" && (TO_GO.test(t) || closed.test(t)));
+  const open = value === undefined ? null : TO_GO.test(value);
   const final = dateFor(text, "Final Submission Deadline");
   const utc = /All deadlines are at 11:59 PM UTC/.test(text);
   const entry = /Entry Deadline\s*-\s*Same as the Final Submission Deadline/.test(text) ? final : dateFor(text, "Entry Deadline");
@@ -123,21 +126,39 @@ export function normalize(card: Card, detail: Detail): ContestInput {
 }
 
 export async function scan(fetcher: Fetcher): Promise<{ seen: number; listings: ContestInput[]; truncated: boolean; rejected: number; examined: number }> {
-  const candidates = parseList(pageHtml("kaggle", (await fetcher.get(renderRequest(LIST_URL, LIST_WAIT))).body)).filter((c) => c.state !== "ongoing");
+  // Only the cards that say `… to go` are open: the list rows' `… ago` is when they closed (measured: a row
+  // `20 days ago` whose page says `Close Nov 2, 2026`, 20 days before), and `Ongoing` has no deadline.
+  const open = parseList(pageHtml("kaggle", (await fetcher.get(renderRequest(LIST_URL, LIST_WAIT))).body)).filter((c) => c.state === "to_go");
   // Cards past the cap are left out rather than written without their page's deadline (which would
   // overwrite a stored one); the read is then truncated.
-  const read = candidates.slice(0, MAX_DETAILS);
-  const details = new Map<string, Detail>();
-  // A page that fails to render (or answers the check page) fails the run.
-  for (const c of read) details.set(c.slug, parseDetail(pageHtml("kaggle", (await fetcher.get(renderRequest(`${ORIGIN}/competitions/${c.slug}`, DETAIL_WAIT))).body)));
+  const read = open.slice(0, MAX_DETAILS);
+  const listings: ContestInput[] = [];
+  let rejected = 0, examined = 0, rendered = 0, deadlines = 0;
+  for (const c of read) {
+    examined++;
+    try {
+      const detail = parseDetail(pageHtml("kaggle", (await fetcher.get(renderRequest(`${ORIGIN}/competitions/${c.slug}`, DETAIL_WAIT))).body));
+      rendered++;
+      if (detail.deadline) deadlines++;
+      // A page that shows itself closed is left out; one without a readable deadline is set aside, so a
+      // deadline stored by an earlier read is kept.
+      if (detail.open === false) continue;
+      if (!detail.deadline) throw new SourceError("kaggle: no final submission deadline");
+      listings.push(normalize(c, detail));
+    } catch (e) {
+      // One page that fails to render or read is set aside (counted; services/collect fails the run when
+      // more than half are); the check page, an access refusal and the request cap are not one page's problem.
+      if (e instanceof FetchError) {
+        if (e.kind === "request_limit") return { seen: open.length, listings, truncated: true, rejected, examined: examined - 1 };
+        if (e.kind === "http_status" && [401, 403, 429].includes(e.status ?? 0)) throw e;
+      } else if (e instanceof AccessChallenge || !(e instanceof SourceError || e instanceof ZodError)) throw e;
+      rejected++;
+    }
+  }
   // No final submission deadline on any page read means the page layout (or its render) changed: fail the
-  // run rather than store every deadline as unknown.
-  if (details.size && ![...details.values()].some((d) => d.deadline)) throw new SourceError("kaggle: no detail page shows a final submission deadline");
-  // Open: the page's Close field says `… to go`; a page without a readable Close field falls back to the
-  // list's `… to go` (plan step 6c-3), and a list row without either is not taken as open.
-  const open = read.filter((c) => details.get(c.slug)!.open ?? c.state === "to_go");
-  const kept = setAside(open, (c) => normalize(c, details.get(c.slug)!));
-  return { seen: open.length, listings: kept.listings, truncated: candidates.length > MAX_DETAILS, rejected: kept.rejected, examined: kept.examined };
+  // run rather than set every competition aside.
+  if (rendered > 0 && deadlines === 0) throw new SourceError("kaggle: no detail page shows a final submission deadline");
+  return { seen: open.length, listings, truncated: open.length > MAX_DETAILS, rejected, examined };
 }
 
 export async function kaggleConnector(fetcher: Fetcher): Promise<Collected<ContestInput>> {

@@ -87,10 +87,10 @@ describe("kaggle pages", () => {
     for (const sel of [LIST_WAIT, DETAIL_WAIT]) expect(sel).not.toMatch(/^\s*(script|meta|link|head|style|template)\b/i);
   });
 
-  it("renders the list, then every card that is not ongoing, and keeps only the open ones", async () => {
+  it("renders the list, then only the cards that say `… to go` (a row's `… ago` is when it closed)", async () => {
     const f = serving(site());
     const got = await kaggleConnector(f);
-    expect(f.urls).toEqual([LIST_URL, detailUrl("example-agent"), detailUrl("example-bowl"), detailUrl("example-late")]);
+    expect(f.urls).toEqual([LIST_URL, detailUrl("example-agent"), detailUrl("example-bowl")]);
     expect([got.seen, got.truncated, got.rejected]).toEqual([2, false, 0]);
     expect(got.listings.map((l) => [l.external_id, l.title, l.company, l.budget_max, l.currency, l.hackathon, l.online, l.deadline, l.registration_deadline, l.url])).toEqual([
       ["example-agent", "Example Agent Competition", "Example Host", 75000, "USD", false, true, { kind: "instant", at: "2026-12-02T23:59:00.000Z" }, "2026-11-25", detailUrl("example-agent")],
@@ -99,19 +99,38 @@ describe("kaggle pages", () => {
     expect(got.listings[1].prize_text).toBe("Kudos");
   });
 
-  it("falls back to the list's `to go` when a page shows no close field, and drops a list row whose page shows none", async () => {
-    const bare = "<h1>Example Bowl</h1><p>nothing readable</p>";
-    const got = await scan(serving({ ...site(), [detailUrl("example-bowl")]: bare, [detailUrl("example-late")]: bare }));
-    expect(got.listings.map((l) => [l.external_id, l.deadline])).toEqual([["example-agent", { kind: "instant", at: "2026-12-02T23:59:00.000Z" }], ["example-bowl", null]]);
+  it("keeps a card whose page shows no close field, leaves out a page that shows itself closed, and sets aside one without a deadline", async () => {
+    const noClose = fixture("detail.html").replace("<span>Close</span>", "<span>Ends</span>");
+    expect((await scan(serving({ ...site(), [detailUrl("example-bowl")]: noClose }))).listings.map((l) => l.external_id)).toEqual(["example-agent", "example-bowl"]);
+    const closed = await scan(serving({ ...site(), [detailUrl("example-bowl")]: LATE }));
+    expect([closed.listings.map((l) => l.external_id), closed.rejected]).toEqual([["example-agent"], 0]);
+    const bare = await scan(serving({ ...site(), [detailUrl("example-bowl")]: "<h1>Example Bowl</h1><span>Close</span><span>2 months to go</span>" }));
+    expect([bare.listings.map((l) => l.external_id), bare.rejected, bare.examined]).toEqual([["example-agent"], 1, 2]);
+  });
+
+  it("sets aside a page that does not render, and fails the run on the check page or a refusal", async () => {
+    const pages: Record<string, string> = { ...site() };
+    delete pages[detailUrl("example-bowl")];
+    const got = await scan(serving(pages));
+    expect([got.listings.map((l) => l.external_id), got.rejected, got.examined]).toEqual([["example-agent"], 1, 2]);
+    await expect(scan(serving({ ...site(), [detailUrl("example-bowl")]: "<html><head><title>Checking your browser - reCAPTCHA</title></head></html>" }))).rejects.toThrow(/challenge/i);
+    const refusing: Fetcher = { requests: 0, async get({ url }) {
+      if (url === LIST_URL) return { status: 200, body: new TextEncoder().encode(fixture("list.html")), tier: "stealth" };
+      throw new FetchError("http_status", "refused", 429);
+    } };
+    await expect(scan(refusing)).rejects.toThrow(/refused/);
+  });
+
+  it("reads the close field past a `Close` button elsewhere on the page", () => {
+    expect(parseDetail(`<button>Close</button><p>Dialog text</p>${LATE}`).open).toBe(false);
   });
 
   it("fails the run when no page read shows a final submission deadline (the layout or the render changed)", async () => {
-    const bare = "<h1>T</h1><span>Close</span><span>10 days to go</span>";
-    await expect(scan(serving({ ...site(bare), [detailUrl("example-late")]: bare }))).rejects.toThrow(/no detail page shows a final submission deadline/);
+    await expect(scan(serving(site("<h1>T</h1><span>Close</span><span>10 days to go</span>")))).rejects.toThrow(/no detail page shows a final submission deadline/);
   });
 
-  it("fails the run when a page does not render, and on Kaggle's check page", async () => {
-    await expect(scan(serving({ [LIST_URL]: fixture("list.html") }))).rejects.toThrow();
+  it("fails the run when the list does not render, and on Kaggle's check page", async () => {
+    await expect(scan(serving({}))).rejects.toThrow();
     await expect(scan(serving({ ...site(), [LIST_URL]: "<html><head><title>Checking your browser - reCAPTCHA</title></head></html>" }))).rejects.toThrow(/challenge/i);
   });
 
