@@ -39,7 +39,7 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       # typecheck, boundaries (incl. retired imports, plan D27), db:check (Postgres schema and migrations agree),
-      # test (PGlite), compose and migration checks, deploy, browser and pre-push hook tests.
+      # test (PGlite), compose and migration checks, deploy, browser, stealth (Python's unittest) and pre-push hook tests.
       - run: pnpm check
       # Every test again on a real Postgres 18: each one using tests/helpers/pg.ts freshPg switches to it,
       # the rest are unaffected. Running the whole suite means no Postgres test can be left out by its file name.
@@ -116,6 +116,34 @@ jobs:
           curl -fsS -o /dev/null -D - -X POST http://127.0.0.1:3100/render -d '{"url":"http://page/","timeoutMs":30000}' | grep -qi '^x-upstream-status: 200'
       - if: failure()
         run: docker logs browser || true
+      # The stealth tier (opportunity types plan step 6c-2; its contract tests run in pnpm check): the image
+      # builds on arm64 and renders a local page with the compose service's restrictions, as its own user.
+      - run: docker build -f deploy/stealth.Dockerfile -t side-income-web:ci-stealth stealth
+      - run: docker image inspect side-income-web:ci-stealth --format 'stealth image size {{.Size}} bytes'
+      - name: Stealth tier renders a page
+        run: |
+          docker rm --force browser
+          test "$(docker run --rm side-income-web:ci-stealth id -u)" != 0
+          docker run -d --name stealth --network smoke -p 127.0.0.1:3101:3100 --cap-drop ALL --security-opt no-new-privileges:true --shm-size 512m --memory 1g --init side-income-web:ci-stealth
+          for i in $(seq 30); do curl -fsS http://127.0.0.1:3101/healthz && break; sleep 1; done
+          # The compose healthcheck's command, in the image it runs in.
+          docker exec stealth /app/.venv/bin/python -c "import sys, urllib.request as u; sys.exit(0 if u.urlopen('http://127.0.0.1:3100/healthz', timeout=3).status == 200 else 1)"
+          out=$(curl -sS -D headers.txt -X POST http://127.0.0.1:3101/render -d '{"url":"http://page/","timeoutMs":60000,"waitFor":"h1"}')
+          cat headers.txt
+          grep -qi '^x-upstream-status: 200' headers.txt
+          grep -q 'Welcome to nginx' <<<"$out"
+          missing=$(curl -sS -D - -o /dev/null -X POST http://127.0.0.1:3101/render -d '{"url":"http://page/missing","timeoutMs":60000}')
+          grep -qi '^x-upstream-status: 404' <<<"$missing"
+          # A selector that never appears is 422 (layout changed) within the budget, and the next render still works.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -m 40 -X POST http://127.0.0.1:3101/render -d '{"url":"http://page/","timeoutMs":15000,"waitFor":".never"}')
+          echo "missing selector: $code"; test "$code" = 422
+          # A render that cannot finish in its time is 504 and leaves no browser behind for the next one.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -m 20 -X POST http://127.0.0.1:3101/render -d '{"url":"http://page/","timeoutMs":300}')
+          echo "past the deadline: $code"; test "$code" = 504
+          docker top stealth; test "$(docker top stealth | grep -ci chrom)" = 0
+          curl -fsS -o /dev/null -D - -X POST http://127.0.0.1:3101/render -d '{"url":"http://page/","timeoutMs":60000}' | grep -qi '^x-upstream-status: 200'
+      - if: failure()
+        run: docker logs stealth || true
 
   gate:
     # The only required check on main: it passes when every other job in this workflow succeeded or was skipped.

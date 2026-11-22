@@ -11,14 +11,16 @@ Wants=network-online.target
 Type=oneshot
 WorkingDirectory=/opt/side-income
 # The browser tier (plan step 8d) for the run; "-": if it cannot start (e.g. its image is missing) the run
-# still goes ahead and only the browser-tier sources fail. Removed after the run whatever its outcome,
-# so Chromium holds no memory between runs.
+# still goes ahead and only the browser-tier sources fail. Both render tiers are removed after the run
+# whatever its outcome, so Chromium holds no memory between runs (deploy/check-compose.mjs keeps the pair).
 ExecStartPre=-/usr/bin/docker compose --env-file /etc/side-income/compose.env -f deploy/compose.yaml --profile jobs up -d --wait browser
+# The stealth tier (opportunity types plan step 6c-2), on its own line: one tier failing to start leaves the other.
+ExecStartPre=-/usr/bin/docker compose --env-file /etc/side-income/compose.env -f deploy/compose.yaml --profile jobs up -d --wait stealth
 # A fixed container name, so the stop below reaches the run container itself and not only the compose client;
 # a leftover one (e.g. after a docker restart mid-run) is removed first, or the name would block every start.
 ExecStartPre=-/usr/bin/docker rm --force side-income-daily
 ExecStart=/usr/bin/docker compose --env-file /etc/side-income/compose.env -f deploy/compose.yaml run --rm --name side-income-daily daily
-ExecStopPost=/usr/bin/docker compose --env-file /etc/side-income/compose.env -f deploy/compose.yaml --profile jobs rm --stop --force browser
+ExecStopPost=/usr/bin/docker compose --env-file /etc/side-income/compose.env -f deploy/compose.yaml --profile jobs rm --stop --force browser stealth
 # A run that timed out or was stopped: its container goes too (design review 12e O4), so the 11:00 start never
 # overlaps it. "-": after a normal run --rm has already removed it.
 ExecStopPost=-/usr/bin/docker rm --force side-income-daily

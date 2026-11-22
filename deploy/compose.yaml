@@ -53,12 +53,13 @@ services:
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       RESEND_INBOX: ${RESEND_INBOX:-}
       BROWSER_URL: http://browser:3100
+      STEALTH_URL: http://stealth:3100
     profiles: [jobs]
-    networks: [default, browser]
+    networks: [default, browser, stealth]
     command: ["pnpm", "exec", "tsx", "scripts/daily.ts"]
 
   # Migrations (deploy.sh runs it with the new image before switching): the database URL only, no Resend
-  # key and no browser network (design review 12e O3; deploy/check-compose.mjs keeps the key on daily alone).
+  # key and no browser or stealth network (design review 12e O3; deploy/check-compose.mjs keeps the key on daily alone).
   migrate:
     <<: *app
     profiles: [jobs]
@@ -89,9 +90,31 @@ services:
       timeout: 5s
       retries: 6
 
+  # The stealth tier (opportunity types plan step 6c-2, D15): renders a page with Scrapling's StealthyFetcher
+  # for the sources whose maxTier is "stealth" (the browser tier's check page blocks them). Same rules as
+  # browser: no published port, its own network shared only with daily (not with browser either), image
+  # tagged after the app image ("-stealth"), started before the run and removed after it by the systemd unit;
+  # without it only the stealth-tier sources fail. Scrapling peaked at 734 MiB on the VM (rebuild plan, spikes.md §2).
+  stealth:
+    image: ${APP_IMAGE:?set APP_IMAGE in the env file}-stealth
+    profiles: [jobs]
+    networks: [stealth]
+    init: true
+    shm_size: 512m
+    mem_limit: 1g
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      # The image has no Node: its own Python asks.
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import sys, urllib.request as u; sys.exit(0 if u.urlopen('http://127.0.0.1:3100/healthz', timeout=3).status == 200 else 1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 6
+
 networks:
   default:
   browser:
+  stealth:
 
 volumes:
   pgdata:
