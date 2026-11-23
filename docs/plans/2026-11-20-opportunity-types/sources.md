@@ -60,7 +60,7 @@ Command: `curl -sL https://mlcontests.com/`; the list is a JSON array in the `da
 
 ## Superteam Earn
 
-Command: `curl -sL "https://earn.superteam.fun/api/listings?take=100"`; detail: `curl -sL https://earn.superteam.fun/api/listings/details/<slug>`. The `type=` and `take=` query values did not change the answer (always 12 rows, all `bounty`).
+Command: `curl -sL "https://earn.superteam.fun/api/listings?take=100"`; detail: `curl -sL https://earn.superteam.fun/api/listings/details/<slug>`. The `type=` and `take=` query values did not change the answer (always 12 rows, all `bounty`). Re-measured 2026-11-23 (step 7): the host moved to `superteam.fun` (308 from `earn.superteam.fun`); `superteam.fun/api/listings?context=all&tab=bounties&status=open` gives the 12 open bounties and `/api/listings/count` with the same query states `All: 12`; `/api/listings/live` gives a different 10 (home page, 7 bounties and 3 projects).
 
 | Field | Mark | Notes |
 |---|---|---|
