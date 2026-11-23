@@ -214,7 +214,7 @@ Why: the 2026-11-20 measurement found 8 sources readable that no step, 不做 or
 
 | Candidate | Kind | Plain request | What the response holds | robots.txt for `*` | Terms |
 |---|---|---|---|---|---|
-| Unstop | hackathons, competitions (India-centred) | 200, public JSON (`/api/public/opportunity/search-result?opportunity=hackathons`) | 7,031 total, 15 a page; `id`, `title`, `end_date` (ISO with offset), `prizes`, `region`, `regnRequirements`, `status`, `organisation`, `public_url` | disallows `/api/*` | not read |
+| Unstop | hackathons, competitions (India-centred) | 200, public JSON (`/api/public/opportunity/search-result?opportunity=hackathons`) | 7,031 total, 15 a page; `id`, `title`, `end_date` (ISO with offset), `prizes`, `region`, `regnRequirements`, `status`, `organisation`, `public_url` | disallows `/api/*` but allows `/api/public/*`, the longer rule, which wins (RFC 9309; corrected 2026-11-23, the first reading missed the `Allow`) | not read |
 | AIcrowd | ML competitions | 200 | 18 distinct challenge links; `Prize` 27, `Completed` 19; no date in the list | no rule for `*` | not read |
 | Hugging Face competitions | ML competitions | 200 | 9 distinct links; `Ongoing` 3, `Finished` 3, `Prize` 6 | allows `/` | not read |
 | CodaLab | ML competitions (research) | 200, 1.5 MB | 1,255 competition links, open and past together | 404 | not read |
