@@ -24,7 +24,8 @@ const MAX_BYTES = 2_000_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 const textOr = (v: unknown, max: number) => (typeof v === "string" && v.trim() && codePoints(v) <= max ? v.trim() : null);
-const positive = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 1 && Number.isSafeInteger(Math.round(v)) ? Math.round(v) : null);
+/** A whole positive amount; a fractional token amount (e.g. 1.5 SOL) is not rounded but left unknown. */
+const positive = (v: unknown) => (typeof v === "number" && Number.isSafeInteger(v) && v >= 1 ? v : null);
 
 function deadlineOf(v: unknown): ContestInput["deadline"] {
   if (v === null || v === undefined) return null;
@@ -38,7 +39,7 @@ export function normalize(item: unknown): ContestInput {
   if (!isObject(item)) throw new SourceError("superteam: a listing is not an object");
   const { id, slug } = item;
   if (typeof id !== "string" || !UUID.test(id)) throw new SourceError("superteam: identifier required");
-  if (typeof slug !== "string" || !/^[a-z0-9][a-z0-9-]{0,299}$/.test(slug)) throw new SourceError("superteam: slug required");
+  if (typeof slug !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._~-]{0,299}$/.test(slug)) throw new SourceError("superteam: slug required");
   const title = textOr(item.title, 500);
   if (!title) throw new SourceError("superteam: invalid title");
   const token = textOr(item.token, 20);
@@ -66,8 +67,8 @@ function json(body: Uint8Array, what: string): unknown {
 const isOpen = (e: unknown) => isObject(e) && e.status === "OPEN";
 
 /**
- * Reads the list and the count the site shows over it. `truncated` unless the bounties listed match the
- * stated count (the list has no paging; a count above it means the list was cut).
+ * Reads the list and the count the site shows over it (both `status=open`). `truncated` unless the open
+ * bounties listed match the stated count (the list has no paging; a count above it means the list was cut).
  */
 export async function scan(fetcher: Fetcher): Promise<{ seen: number; listings: ContestInput[]; truncated: boolean; rejected: number; examined: number }> {
   const headers = { "User-Agent": USER_AGENT, Accept: "application/json" };
@@ -76,14 +77,17 @@ export async function scan(fetcher: Fetcher): Promise<{ seen: number; listings: 
   const count = json((await fetcher.get({ url: COUNT_URL, maxBytes: 100_000, timeoutMs: 25_000, headers })).body, "the count");
   const total = isObject(count) ? count.All : undefined;
   if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0) throw new SourceError("superteam: no count");
-  const bounties = list.filter((e) => isObject(e) && e.type === "bounty");
+  // The query asks for bounties only; a `type` the code does not recognise means the API changed.
+  const bounties = list.filter((e) => isObject(e) && typeof e.type === "string" && e.type.toLowerCase() === "bounty");
+  if (list.length > 0 && bounties.length === 0) throw new SourceError("superteam: no entry is a bounty");
   const contests = new Map<string, ContestInput>();
-  const kept = setAside(bounties.filter(isOpen), (e) => {
+  const open = bounties.filter(isOpen);
+  const kept = setAside(open, (e) => {
     const c = normalize(e);
     contests.set(c.external_id, c);
     return c;
   });
-  return { seen: contests.size + kept.rejected, listings: [...contests.values()], truncated: bounties.length !== total, rejected: kept.rejected, examined: kept.examined };
+  return { seen: contests.size + kept.rejected, listings: [...contests.values()], truncated: open.length !== total, rejected: kept.rejected, examined: kept.examined };
 }
 
 export async function superteamConnector(fetcher: Fetcher): Promise<Collected<ContestInput>> {

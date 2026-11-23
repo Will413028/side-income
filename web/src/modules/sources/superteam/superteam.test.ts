@@ -31,7 +31,7 @@ const bounty = (n: number, changes: Record<string, unknown> = {}) => ({
   deadline: "2026-11-30T23:59:59.000Z", rewardAmount: 500, token: "USDC", compensationType: "fixed", minRewardAsk: null, maxRewardAsk: null,
   sponsor: { name: "Example Sponsor", slug: "example" }, ...changes,
 });
-const api = (all: unknown[], total = all.filter((b) => (b as { type?: unknown }).type === "bounty").length) => ({
+const api = (all: unknown[], total = all.filter((b) => { const x = b as { type?: unknown; status?: unknown }; return x.type === "bounty" && x.status === "OPEN"; }).length) => ({
   [LIST_URL]: JSON.stringify(all),
   [COUNT_URL]: JSON.stringify({ "For You": 0, All: total, Content: total }),
 });
@@ -51,6 +51,7 @@ describe("superteam bounties", () => {
     expect(normalize(bounty(1, { compensationType: "variable", rewardAmount: null }))).toMatchObject({ budget_min: null, budget_max: null, currency: null });
     expect(normalize(bounty(1, { token: null }))).toMatchObject({ budget_max: null, currency: null });
     expect(normalize(bounty(1, { rewardAmount: 0 })).budget_max).toBeNull();
+    expect(normalize(bounty(1, { rewardAmount: 1.5, token: "SOL" }))).toMatchObject({ budget_max: null, currency: null });
   });
 
   it("keeps a deadline without an offset as unusable text, and a missing one as unknown", () => {
@@ -65,9 +66,18 @@ describe("superteam bounties", () => {
 
 describe("superteam reads", () => {
   it("keeps open bounties only, reads two URLs and is complete when the count matches", async () => {
-    const f = serving(api([bounty(1), bounty(2, { type: "project" }), bounty(3, { status: "REVIEW" }), bounty(4)], 3));
+    const f = serving(api([bounty(1), bounty(2, { type: "project" }), bounty(3, { status: "REVIEW" }), bounty(4)], 2));
     const got = await superteamConnector(f);
     expect([f.urls, got.listings.map((l) => l.external_id), got.seen, got.truncated]).toEqual([[LIST_URL, COUNT_URL], [ID(1), ID(4)], 2, false]);
+  });
+
+  it("accepts a slug with capitals, dots or underscores, and a type in another case", async () => {
+    expect(normalize(bounty(1, { slug: "Solana_Bounty.v2" })).url).toBe("https://superteam.fun/earn/listing/Solana_Bounty.v2");
+    expect((await scan(serving(api([bounty(1, { type: "BOUNTY" })], 1)))).listings).toHaveLength(1);
+  });
+
+  it("fails when no listed entry is a bounty", async () => {
+    await expect(scan(serving(api([bounty(1, { type: undefined })], 1)))).rejects.toThrow(/superteam: no entry/);
   });
 
   it("is not complete when the stated count differs from the bounties listed", async () => {
