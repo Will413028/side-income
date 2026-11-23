@@ -9,6 +9,7 @@ import { MLCONTESTS_SETTINGS } from "./mlcontests";
 import { ZINDI_SETTINGS } from "./zindi";
 import { DRIVENDATA_SETTINGS } from "./drivendata";
 import { CRUNCHDAO_SETTINGS } from "./crunchdao";
+import { SUPERTEAM_SETTINGS } from "./superteam";
 import { BHUNTR_SETTINGS } from "./bhuntr";
 import { KAGGLE_SETTINGS } from "./kaggle";
 import { DYNAMITEJOBS_SETTINGS } from "./dynamitejobs";
@@ -99,6 +100,8 @@ export const SOURCES: readonly SourceSettings[] = [
   { ...BHUNTR_SETTINGS, order: 390 },
   // Opportunity types plan step 6c-3: Kaggle (stealth tier, D15).
   { ...KAGGLE_SETTINGS, order: 400 },
+  // Opportunity types plan step 7: Superteam Earn bounties, stored as contests (Will 2026-11-23).
+  { ...SUPERTEAM_SETTINGS, order: 410 },
 ];
 
 export function sourceSettings(name: string): SourceSettings {
